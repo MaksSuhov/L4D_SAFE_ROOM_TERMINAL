@@ -7,3 +7,4 @@ numpy>=1.26
 pydantic>=2.9
 pydantic-settings>=2.6
 openai>=1.55
+httpx>=0.27

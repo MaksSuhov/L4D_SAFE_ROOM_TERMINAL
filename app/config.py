@@ -9,9 +9,10 @@ the configuration layer the single source of truth.
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Final
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_EMBEDDING_DIMENSIONS: Final[int] = 1536
@@ -26,6 +27,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        populate_by_name=True,
     )
 
     # --- Application -----------------------------------------------------
@@ -36,7 +38,6 @@ class Settings(BaseSettings):
         default="/api/v1",
         description="Prefix for every route; set to an empty string to serve routes from the root.",
     )
-
     # --- Database --------------------------------------------------------
     database_url: str = Field(
         default="postgresql+asyncpg://l4d:l4d@localhost:5432/l4d_terminal",
@@ -50,18 +51,94 @@ class Settings(BaseSettings):
         description="Create the schema on application start-up instead of running seed.py.",
     )
 
-    # --- OpenAI ----------------------------------------------------------
-    openai_api_key: str = Field(default="", repr=False)
-    openai_base_url: str | None = Field(
-        default=None,
-        description="Optional custom endpoint, useful for proxies and local gateways.",
+    # --- AI provider ------------------------------------------------------
+    # Every provider is reached through the OpenAI-compatible API, so one set of
+    # settings serves OpenAI, an aggregator such as RouterAI, or a local gateway.
+    # Each field accepts several environment names; the first one that is present
+    # wins, which keeps the shared names ahead of the provider-specific ones.
+    ai_api_key: str = Field(
+        default="",
+        repr=False,
+        validation_alias=AliasChoices("AI_API_KEY", "OPENAI_API_KEY", "ROUTERAI_API_KEY"),
     )
-    openai_timeout_seconds: float = 30.0
-    embedding_model: str = "text-embedding-3-small"
+    ai_base_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AI_BASE_URL", "OPENAI_BASE_URL", "ROUTERAI_BASE_URL"),
+        description="Endpoint of the OpenAI-compatible gateway; unset targets OpenAI itself.",
+    )
+    ai_timeout_seconds: float = Field(
+        default=30.0,
+        validation_alias=AliasChoices("AI_TIMEOUT_SECONDS", "OPENAI_TIMEOUT_SECONDS"),
+    )
+    embedding_model: str = Field(
+        default="text-embedding-3-small",
+        description=(
+            "Provider-specific model id. Aggregators such as RouterAI require the "
+            "vendor prefix, e.g. openai/text-embedding-3-small."
+        ),
+    )
     embedding_dimensions: int = DEFAULT_EMBEDDING_DIMENSIONS
     chat_model: str = "gpt-4o-mini"
     chat_temperature: float = 0.7
     chat_max_tokens: int = 600
+
+    # --- Answer language --------------------------------------------------
+    # The terminal answers in Russian regardless of the persona and of the
+    # language of the question: the instruction below is appended to every
+    # system prompt, so the language is a deployment-wide setting rather than a
+    # property of each character stored in the database.
+    answer_language_instruction: str = Field(
+        default=(
+            "Всегда отвечай только на русском языке, независимо от языка вопроса. "
+            "Весь диалог, включая каждую реплику, веди на русском."
+        ),
+        description=(
+            "Instruction appended to every persona prompt to pin the language of "
+            "the answers and of the whole dialogue."
+        ),
+    )
+
+    # --- Wiki corpus ------------------------------------------------------
+    # The corpus is downloaded once from the Left 4 Dead Fandom wiki, parsed and
+    # written to ``corpus_path`` as JSONL. Seeding reads that snapshot, so it is
+    # reproducible and works offline; only ``--refresh`` talks to the network.
+    wiki_base_url: str = "https://left4dead.fandom.com"
+    wiki_request_timeout_seconds: float = Field(default=30.0, gt=0.0)
+    wiki_user_agent: str = Field(
+        default="L4D-SafeRoom-Terminal/0.1 (portfolio project; lore ingestion)",
+        description="Sent with every wiki request; the Fandom API rejects anonymous clients.",
+    )
+    wiki_cache_dir: Path = Field(
+        default=Path("data/wiki_cache"),
+        description="Raw wikitext kept between runs so a re-parse needs no network.",
+    )
+    wiki_cache_enabled: bool = True
+    corpus_path: Path = Field(
+        default=Path("data/corpus/lore.jsonl"),
+        description="Normalised corpus snapshot ingested into the vector store.",
+    )
+    ingestion_batch_size: int = Field(
+        default=64,
+        ge=1,
+        le=2048,
+        description="Texts per embedding request during ingestion.",
+    )
+    translation_batch_size: int = Field(
+        default=16,
+        ge=1,
+        le=128,
+        description="Texts per translation request when normalising the corpus language.",
+    )
+    corpus_language: str = Field(
+        default="ru",
+        min_length=2,
+        max_length=8,
+        description=(
+            "Language the corpus is normalised into during ingestion. Keeping it in the "
+            "same language as the answers makes retrieval monolingual, which measurably "
+            "raises similarity scores compared with cross-language search."
+        ),
+    )
 
     # --- Retrieval augmented generation ----------------------------------
     rag_top_k: int = Field(default=3, ge=1, le=20)
@@ -80,9 +157,9 @@ class Settings(BaseSettings):
         return f"/{stripped}" if stripped else ""
 
     @property
-    def is_openai_configured(self) -> bool:
+    def is_ai_configured(self) -> bool:
         """Whether an API key is present, checked before the client is built."""
-        return bool(self.openai_api_key.strip())
+        return bool(self.ai_api_key.strip())
 
 
 @lru_cache(maxsize=1)

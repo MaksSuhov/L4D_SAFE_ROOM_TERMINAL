@@ -14,7 +14,12 @@ from app.schemas.character_schema import (
 )
 from app.schemas.chat_schema import ChatRequest, ChatResponse
 from app.schemas.health_schema import HealthResponse
-from app.schemas.lore_schema import LoreChunkCreate, LoreSource
+from app.schemas.lore_schema import (
+    EmbeddedLoreChunk,
+    IngestionReport,
+    LoreChunkCreate,
+    LoreSource,
+)
 
 __all__ = [
     "CharacterBase",
@@ -22,8 +27,10 @@ __all__ = [
     "CharacterRead",
     "ChatRequest",
     "ChatResponse",
+    "EmbeddedLoreChunk",
     "FewShotExample",
     "HealthResponse",
+    "IngestionReport",
     "LoreChunkCreate",
     "LoreSource",
 ]

@@ -11,8 +11,8 @@ from collections.abc import Iterator
 
 import pytest
 
-os.environ.setdefault("OPENAI_API_KEY", "test-key")
-os.environ.setdefault("OPENAI_BASE_URL", "http://localhost:1/v1")
+os.environ.setdefault("AI_API_KEY", "test-key")
+os.environ.setdefault("AI_BASE_URL", "http://localhost:1/v1")
 os.environ.setdefault(
     "DATABASE_URL",
     "postgresql+asyncpg://l4d:l4d@localhost:5432/l4d_terminal",

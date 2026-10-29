@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from typing import NamedTuple, Protocol
 
 from app.models import Character, LoreChunk
+from app.schemas import EmbeddedLoreChunk
 
 
 class RetrievedChunk(NamedTuple):
@@ -36,23 +37,11 @@ class CharacterRepositoryProtocol(Protocol):
 class LoreChunkRepositoryProtocol(Protocol):
     """Persistence and vector search over lore fragments."""
 
-    async def create_chunk(
-        self,
-        *,
-        content: str,
-        data_type: str,
-        embedding: Sequence[float],
-    ) -> LoreChunk:
+    async def create_chunk(self, record: EmbeddedLoreChunk) -> LoreChunk:
         """Persist a single embedded lore fragment."""
         ...
 
-    async def create_chunks(
-        self,
-        *,
-        contents: Sequence[str],
-        data_types: Sequence[str],
-        embeddings: Sequence[Sequence[float]],
-    ) -> Sequence[LoreChunk]:
+    async def create_chunks(self, records: Sequence[EmbeddedLoreChunk]) -> Sequence[LoreChunk]:
         """Persist several embedded lore fragments in one round trip."""
         ...
 
@@ -64,6 +53,10 @@ class LoreChunkRepositoryProtocol(Protocol):
         data_type: str | None = None,
     ) -> Sequence[RetrievedChunk]:
         """Return the ``limit`` closest chunks ordered by descending similarity."""
+        ...
+
+    async def existing_content_hashes(self, hashes: Sequence[str]) -> set[str]:
+        """Return which of the given content hashes are already stored."""
         ...
 
     async def count(self) -> int:
@@ -79,6 +72,24 @@ class AIClientProtocol(Protocol):
 
     async def get_embedding(self, text: str) -> list[float]:
         """Embed ``text`` into a vector of ``embedding_dimensions`` floats."""
+        ...
+
+    async def get_embeddings(self, texts: Sequence[str]) -> list[list[float]]:
+        """Embed a batch of texts, preserving their order.
+
+        Batching matters: the corpus holds hundreds of records, and one request
+        per record would turn seeding into a coffee break.
+        """
+        ...
+
+    async def translate_texts(self, texts: Sequence[str]) -> list[str]:
+        """Translate a batch of texts into the configured corpus language.
+
+        Used once, while the corpus is built, so an English wiki becomes a
+        corpus in the language the terminal answers in. Implementations must
+        return exactly one translation per input, falling back to the original
+        text rather than dropping a record.
+        """
         ...
 
     async def generate_response(

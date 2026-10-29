@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Generic, TypeVar
 
-from sqlalchemy import func, select
+from sqlalchemy import CursorResult, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import Base
@@ -19,8 +19,13 @@ from app.interfaces import (
     RetrievedChunk,
 )
 from app.models import Character, LoreChunk
+from app.schemas import EmbeddedLoreChunk
 
 ModelT = TypeVar("ModelT", bound=Base)
+
+HASH_LOOKUP_CHUNK_SIZE = 1000
+"""Upper bound on the parameters of one ``IN (...)`` lookup, so a large corpus
+never produces a statement the server refuses to plan."""
 
 
 class BaseRepository(Generic[ModelT]):
@@ -77,32 +82,15 @@ class LoreChunkRepository(BaseRepository[LoreChunk], LoreChunkRepositoryProtocol
 
     model = LoreChunk
 
-    async def create_chunk(
-        self,
-        *,
-        content: str,
-        data_type: str,
-        embedding: Sequence[float],
-    ) -> LoreChunk:
+    async def create_chunk(self, record: EmbeddedLoreChunk) -> LoreChunk:
         """Persist one embedded lore fragment."""
-        chunk = LoreChunk(content=content, data_type=data_type, embedding=list(embedding))
-        return await self.add(chunk)
+        return await self.add(self._to_model(record))
 
-    async def create_chunks(
-        self,
-        *,
-        contents: Sequence[str],
-        data_types: Sequence[str],
-        embeddings: Sequence[Sequence[float]],
-    ) -> Sequence[LoreChunk]:
+    async def create_chunks(self, records: Sequence[EmbeddedLoreChunk]) -> Sequence[LoreChunk]:
         """Persist a batch of embedded lore fragments in a single flush."""
-        if not (len(contents) == len(data_types) == len(embeddings)):
-            raise ValueError("contents, data_types and embeddings must have the same length")
-
-        chunks = [
-            LoreChunk(content=content, data_type=data_type, embedding=list(embedding))
-            for content, data_type, embedding in zip(contents, data_types, embeddings, strict=True)
-        ]
+        if not records:
+            return []
+        chunks = [self._to_model(record) for record in records]
         self._session.add_all(chunks)
         await self._session.flush()
         return chunks
@@ -132,3 +120,43 @@ class LoreChunkRepository(BaseRepository[LoreChunk], LoreChunkRepositoryProtocol
             RetrievedChunk(chunk=chunk, similarity=1.0 - float(distance_value))
             for chunk, distance_value in result.all()
         ]
+
+    async def delete_all(self) -> int:
+        """Remove every stored fragment and report how many rows went.
+
+        Ingestion is incremental — a record whose text changed is stored again
+        under a new hash rather than replacing the old row — so re-indexing a
+        corpus that was edited in place needs an explicit wipe first. The method
+        is deliberately absent from the repository port: no service is allowed to
+        empty the archive, only the seeding tool that owns its lifecycle.
+        """
+        result = await self._session.execute(delete(LoreChunk))
+        # A DELETE returns a cursor result, which is the only kind that reports
+        # how many rows it touched.
+        assert isinstance(result, CursorResult)
+        return int(result.rowcount or 0)
+
+    async def existing_content_hashes(self, hashes: Sequence[str]) -> set[str]:
+        """Return which of the given content hashes are already stored."""
+        wanted = list(dict.fromkeys(hashes))
+        found: set[str] = set()
+        for start in range(0, len(wanted), HASH_LOOKUP_CHUNK_SIZE):
+            window = wanted[start : start + HASH_LOOKUP_CHUNK_SIZE]
+            statement = select(LoreChunk.content_hash).where(LoreChunk.content_hash.in_(window))
+            result = await self._session.execute(statement)
+            found.update(result.scalars().all())
+        return found
+
+    @staticmethod
+    def _to_model(record: EmbeddedLoreChunk) -> LoreChunk:
+        """Translate a corpus record into its ORM representation."""
+        return LoreChunk(
+            content=record.content,
+            content_hash=record.content_hash,
+            source_type=str(record.source_type),
+            topic=str(record.topic),
+            title=record.title,
+            character_name=record.character_name,
+            source_url=record.source_url,
+            embedding=list(record.embedding),
+        )
