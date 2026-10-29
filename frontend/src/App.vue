@@ -62,11 +62,11 @@ function applySuggestion(prompt) {
 
 <template>
   <div class="relative flex h-dvh flex-col overflow-hidden">
+    <div class="terminal-backdrop" aria-hidden="true" />
     <div class="crt-overlay" aria-hidden="true" />
 
     <TerminalHeader
       :status="connectionStatus"
-      :character-count="characters.length"
       @new-session="startNewSession"
       @retry="loadCharacters"
     />

@@ -4,10 +4,12 @@ import { computed } from 'vue'
 
 import { apiDocsUrl } from '@/api/config'
 
+/** The blood-splattered "4" cut from the official logo by the asset pipeline. */
+const MARK_URL = '/brand/l4d-mark.png'
+
 const props = defineProps({
   /** 'connecting' | 'online' | 'offline' — the state of the roster request. */
   status: { type: String, default: 'connecting' },
-  characterCount: { type: Number, default: 0 },
 })
 
 defineEmits(['new-session', 'retry'])
@@ -24,13 +26,22 @@ const state = computed(() => STATUS[props.status] ?? STATUS.connecting)
 <template>
   <header class="relative shrink-0 border-b border-term-amber/15 bg-bunker-900/70 backdrop-blur">
     <div class="mx-auto flex w-full max-w-3xl items-center gap-3 px-4 py-3 sm:px-6">
+      <img
+        :src="MARK_URL"
+        alt=""
+        class="size-8 shrink-0 drop-shadow-[0_0_8px_rgba(194,30,37,0.45)]"
+        aria-hidden="true"
+      />
+
       <div class="min-w-0">
-        <h1 class="flex items-center gap-2 text-xs tracking-[0.25em] text-term-amber text-glow-amber uppercase">
-          Safe-room terminal
-          <span class="cursor-blink text-term-green" aria-hidden="true">▍</span>
+        <h1
+          class="flex items-center gap-2 text-[0.65rem] tracking-[0.12em] text-term-amber text-glow-amber uppercase sm:text-xs sm:tracking-[0.25em]"
+        >
+          <span class="truncate">L4D SAFE-ROOM TERMINAL</span>
+          <span class="cursor-blink shrink-0 text-term-green" aria-hidden="true">▍</span>
         </h1>
         <p class="mt-0.5 truncate text-[0.6rem] tracking-[0.2em] text-zinc-500 uppercase">
-          L4D · архив лора убежища · выживших: {{ characterCount }}
+          Архив лора убежища<span class="hidden sm:inline"> · канал выживших</span>
         </p>
       </div>
 
@@ -58,10 +69,12 @@ const state = computed(() => STATUS[props.status] ?? STATUS.connecting)
         <button
           type="button"
           class="flex shrink-0 items-center gap-1.5 rounded-sm border border-zinc-800 px-2.5 py-1 text-[0.6rem] tracking-[0.2em] whitespace-nowrap text-zinc-500 uppercase transition-colors hover:border-term-amber/40 hover:text-term-amber"
+          aria-label="Новая сессия"
           @click="$emit('new-session')"
         >
           <RotateCcw class="size-3.5" aria-hidden="true" />
-          Новая сессия
+          <!-- On a narrow screen the icon alone keeps the wordmark on one line. -->
+          <span class="hidden sm:inline">Новая сессия</span>
         </button>
 
         <a

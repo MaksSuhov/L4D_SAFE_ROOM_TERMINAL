@@ -52,6 +52,47 @@
 }
 
 /* ---------------------------------------------------------------------------
+   The safe room itself: the Special Infected line-up, sunk into the dark so
+   that the transcript stays readable on top of it. A fixed layer rather than
+   `background-attachment: fixed`, which stutters on mobile.
+   --------------------------------------------------------------------------- */
+.terminal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-color: var(--color-bunker-950);
+  background-image: url('/backgrounds/specials.jpg');
+  background-position: center 42%;
+  background-size: cover;
+  filter: brightness(0.62) saturate(0.85) contrast(1.05);
+}
+
+.terminal-backdrop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  /* Dark at the edges where the panels sit, lighter across the middle where
+     the horde should still read through, and darker down the centre column
+     where the answers are printed. */
+  background-image:
+    linear-gradient(
+      to bottom,
+      rgba(7, 8, 10, 0.92) 0%,
+      rgba(7, 8, 10, 0.55) 20%,
+      rgba(7, 8, 10, 0.34) 50%,
+      rgba(7, 8, 10, 0.78) 88%,
+      rgba(7, 8, 10, 0.95) 100%
+    ),
+    radial-gradient(
+      ellipse 52% 62% at 50% 48%,
+      rgba(7, 8, 10, 0.72) 0%,
+      rgba(7, 8, 10, 0.4) 60%,
+      transparent 100%
+    );
+}
+
+/* ---------------------------------------------------------------------------
    CRT shell: scan lines and the darkened corners of a worn-out monitor.
    --------------------------------------------------------------------------- */
 .crt-overlay {

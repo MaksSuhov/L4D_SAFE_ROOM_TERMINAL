@@ -34,13 +34,13 @@ const clock = computed(() => formatClock(props.message.createdAt))
     </span>
   </div>
 
-  <!-- The operator: a plain block flushed to the right edge. -->
+  <!-- The survivor at the keyboard: a plain block flushed to the right edge. -->
   <div v-else-if="isUser" class="message-entry flex justify-end">
     <div class="max-w-[85%] space-y-1">
       <div
         class="flex items-center justify-end gap-3 text-[0.6rem] tracking-[0.25em] text-zinc-600 uppercase"
       >
-        <span>Оператор</span>
+        <span>Выживший</span>
         <span class="tabular-nums">{{ clock }}</span>
       </div>
       <p
