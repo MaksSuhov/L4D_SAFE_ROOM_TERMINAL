@@ -11,7 +11,7 @@ PIP := .venv/bin/pip
 FRONTEND := frontend
 
 .PHONY: help install install-python install-frontend db db-down seed seed-reset \
-	reingest corpus-refresh corpus-translate dev dev-backend dev-frontend test lint typecheck \
+	reingest corpus-refresh corpus-translate assets dev dev-backend dev-frontend test lint typecheck \
 	check build clean
 
 help: ## Показать доступные команды
@@ -50,6 +50,9 @@ corpus-refresh: ## Перечитать вики и пересобрать сн�
 
 corpus-translate: ## То же плюс нормализация языка корпуса (долго, платно)
 	$(PYTHON) seed.py --refresh --corpus-only --translate
+
+assets: ## Пересобрать ассеты интерфейса: портреты выживших, фон и знак из вики
+	$(PYTHON) scripts/fetch_brand_assets.py
 
 dev: ## Запустить весь проект: база, seed, бэкенд (:8000) и фронтенд (:5173)
 	./scripts/dev.sh
