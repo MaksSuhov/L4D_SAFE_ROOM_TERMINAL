@@ -17,7 +17,13 @@ The pipeline is four steps, each replaceable on its own:
     Optional: normalises the corpus into the language the terminal answers in.
 """
 
-from app.ingestion.parsers import ArticleParser, CorpusParser, GraffitiParser, QuotesParser
+from app.ingestion.parsers import (
+    ArticleParser,
+    CorpusParser,
+    GraffitiParser,
+    QuotesParser,
+    SubtitlesParser,
+)
 from app.ingestion.service import CorpusBuildReport, WikiCorpusBuilder
 from app.ingestion.snapshot import CorpusSnapshot
 from app.ingestion.sources import WIKI_SOURCES, ParserKind, WikiSource
@@ -38,6 +44,7 @@ __all__ = [
     "ParserKind",
     "QuotesParser",
     "Section",
+    "SubtitlesParser",
     "TranslationOutcome",
     "WikiCorpusBuilder",
     "WikiPageNotFoundError",

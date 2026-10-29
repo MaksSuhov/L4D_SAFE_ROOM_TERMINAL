@@ -60,3 +60,24 @@ class LoreTopic(StrEnum):
 
     QUOTES = "quotes"
     """Dialogue lines of the survivors."""
+
+    WEAPONS = "weapons"
+    """The arsenal: firearms, melee weapons, ammunition and upgrades."""
+
+    ITEMS = "items"
+    """Pickups and deployables: healing, throwables, gas cans, props."""
+
+    LOCATIONS = "locations"
+    """Named places of the outbreak, from hospitals to fairgrounds."""
+
+    GAME_MODES = "game_modes"
+    """Game modes, difficulty levels and the rules that shape a run."""
+
+    ACHIEVEMENTS = "achievements"
+    """The achievements and the stunts they reward."""
+
+    NPCS = "npcs"
+    """Non-playable characters: Virgil, Whitaker, the military."""
+
+    TACTICS = "tactics"
+    """Advice and strategies the survivors wrote down for each other."""

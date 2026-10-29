@@ -30,7 +30,12 @@ logger = logging.getLogger("l4d.ingestion.wiki")
 RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 MAX_ATTEMPTS = 3
 BACKOFF_SECONDS = 1.5
-UNSAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
+UNSAFE_FILENAME_PATTERN = re.compile(r"[^\w.-]+", re.UNICODE)
+"""Characters kept in a cache filename.
+
+The corpus is read from the Russian wiki, so titles are Cyrillic; an ASCII-only
+pattern would collapse every one of them to the same empty slug.
+"""
 
 
 class WikiPageNotFoundError(ApplicationError):

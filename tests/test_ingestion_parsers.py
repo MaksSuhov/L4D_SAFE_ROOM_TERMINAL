@@ -11,6 +11,7 @@ from app.ingestion import (
     GraffitiParser,
     ParserKind,
     QuotesParser,
+    SubtitlesParser,
     WikiSource,
     WikitextCleaner,
 )
@@ -239,6 +240,32 @@ class TestWikitextCleaner:
         assert [item.text for item in items] == ["real"]
 
 
+    def test_a_file_link_with_a_link_in_its_caption_is_dropped_whole(self) -> None:
+        """A naive split on pipes tears the caption and leaks a stray ``]]``."""
+        markup = (
+            "[[Файл:Ammo 1.png|thumb|Склад [[Боеприпасы|боеприпасов]] "
+            "может быть использован]]Текст."
+        )
+
+        text = WikitextCleaner().clean(markup)
+
+        assert text == "Текст."
+
+    def test_empty_parentheses_left_by_a_dropped_template_are_removed(self) -> None:
+        markup = "'''Зелёный грипп''' ({{lang-en|Green Flu}}) — страшный вирус."
+
+        assert WikitextCleaner().clean(markup) == "Зелёный грипп — страшный вирус."
+
+    def test_interlanguage_links_at_the_end_of_a_page_leave_nothing(self) -> None:
+        """Every article ends with them, and they would become a record of link names."""
+        markup = (
+            "Носители заражают других.\n\n"
+            "[[en:Carriers]]\n[[es:Portadores]]\n[[Категория:Заражение]]"
+        )
+
+        assert WikitextCleaner().clean(markup) == "Носители заражают других."
+
+
 class TestGraffitiParser:
     def test_keeps_replies_together_with_the_inscription_they_answer(self) -> None:
         records = parse_graffiti()
@@ -280,10 +307,158 @@ class TestGraffitiParser:
         assert all(record.content.startswith("Inscription") for record in records)
 
 
+RUSSIAN_GRAFFITI_MARKUP = """
+== ''Left 4 Dead'' ==
+=== «[[Нет милосердию]]» ===
+{| class="wikitable" style="width: 100%;"
+ |-
+ ! colspan="2" | <center>«[[Апартаменты]]»</center>
+ |-
+ ! Оригинал
+ ! Перевод
+ |-
+ | NO HOPE
+ | НАДЕЖДЫ НЕТ
+ |-
+ | <u>ENTIRE</u> CITY IS GONE
+ | <u>ВЕСЬ</u> ГОРОД ПАЛ
+ |-
+ ! colspan="2" | <center>«[[Метро]]»</center>
+ |-
+ | NO CURE
+ | ЛЕКАРСТВА НЕТ
+ |-
+ | An inscription the wiki never translated
+ |}
+"""
+
+SUBTITLES_MARKUP = """
+{| class="article-table"
+|-
+! Русский язык
+! Английский язык
+|-
+| colspan="2" class="table-group-name" | AlertGiveItem
+|-
+|"Mechanic_AlertGiveItem01"
+"<span style="color: rgb(1,2,3)">Эллис: У меня есть кое-что для тебя.</span>"
+|"[english]Mechanic_AlertGiveItem01"
+"<span style="color: rgb(1,2,3)">Ellis: I got this for ya, man.</span>"
+|-
+|"Mechanic_AlertGiveItem02"
+"<span style="color: rgb(1,2,3)">Эллис: Можешь взять себе.</span>"
+|"[english]Mechanic_AlertGiveItem02"
+"<span style="color: rgb(1,2,3)">Ellis: You can have this.</span>"
+|-
+| colspan="2" class="table-group-name" | ClownInfected
+|-
+|"Mechanic_Clown01"
+"<span style="color: rgb(1,2,3)">Эллис: Этот клоун привёл друзей! Убейте его!</span>"
+|"[english]Mechanic_Clown01"
+"<span style="color: rgb(1,2,3)">Ellis: That clown's bringing friends, man!</span>"
+|-
+|"Mechanic_Clown02"
+"<span style="color: rgb(1,2,3)">Эллис: Убейте этого клоуна!</span>"
+|"[english]Mechanic_Clown02"
+"<span style="color: rgb(1,2,3)">Ellis: Take out that clown!</span>"
+|}
+"""
+
+
+def subtitles_source() -> WikiSource:
+    return WikiSource(
+        "Субтитры (Left 4 Dead 2)/Эллис",
+        LoreTopic.QUOTES,
+        ParserKind.SUBTITLES,
+        character_name="Эллис",
+    )
+
+
+def parse_graffiti_table(markup: str = RUSSIAN_GRAFFITI_MARKUP) -> list[LoreChunkCreate]:
+    """Run the graffiti parser on the table layout of the Russian wiki."""
+    return GraffitiParser(WikitextCleaner()).parse(graffiti_source(), markup, source_url="wiki")
+
+
+def parse_subtitles(markup: str = SUBTITLES_MARKUP) -> list[LoreChunkCreate]:
+    """Run the subtitles parser as if the markup came from the wiki."""
+    return SubtitlesParser(WikitextCleaner()).parse(subtitles_source(), markup, source_url="wiki")
+
+
+class TestGraffitiTableLayout:
+    def test_a_place_becomes_a_record_titled_campaign_and_place(self) -> None:
+        records = parse_graffiti_table()
+
+        assert {record.title for record in records} == {
+            "Нет милосердию › Апартаменты",
+            "Нет милосердию › Метро",
+        }
+
+    def test_only_the_russian_column_is_kept_and_markup_is_stripped(self) -> None:
+        apartments = next(
+            record
+            for record in parse_graffiti_table()
+            if record.title == "Нет милосердию › Апартаменты"
+        )
+
+        assert apartments.content.splitlines() == ["НАДЕЖДЫ НЕТ", "ВЕСЬ ГОРОД ПАЛ"]
+
+    def test_a_row_without_a_translation_is_dropped(self) -> None:
+        metro = next(
+            record
+            for record in parse_graffiti_table()
+            if record.title == "Нет милосердию › Метро"
+        )
+
+        assert metro.content == "ЛЕКАРСТВА НЕТ"
+
+
+class TestSubtitlesParser:
+    def test_keeps_the_russian_lines_of_each_cue_and_drops_the_english_ones(self) -> None:
+        records = parse_subtitles()
+
+        assert {record.title for record in records} == {
+            "Эллис · AlertGiveItem",
+            "Эллис · ClownInfected",
+        }
+        clown = next(record for record in records if record.title == "Эллис · ClownInfected")
+        assert clown.content.splitlines() == [
+            "Этот клоун привёл друзей! Убейте его!",
+            "Убейте этого клоуна!",
+        ]
+        assert not any("clown" in line.lower() for line in clown.content.splitlines())
+
+    def test_records_are_tagged_as_the_character_voice(self) -> None:
+        records = parse_subtitles()
+
+        assert all(record.source_type is SourceType.VOICE for record in records)
+        assert all(record.character_name == "Эллис" for record in records)
+        assert all(record.topic is LoreTopic.QUOTES for record in records)
+
+    def test_a_situation_with_a_single_line_is_dropped(self) -> None:
+        markup = SUBTITLES_MARKUP.replace(
+            '|"Mechanic_Clown02"\n'
+            '"<span style="color: rgb(1,2,3)">Эллис: Убейте этого клоуна!</span>"\n'
+            '|"[english]Mechanic_Clown02"\n'
+            '"<span style="color: rgb(1,2,3)">Ellis: Take out that clown!</span>"\n',
+            "",
+        )
+
+        assert {record.title for record in parse_subtitles(markup)} == {"Эллис · AlertGiveItem"}
+
+    def test_a_page_without_a_character_is_ignored(self) -> None:
+        source = WikiSource("Субтитры", LoreTopic.QUOTES, ParserKind.SUBTITLES)
+
+        parsed = SubtitlesParser(WikitextCleaner()).parse(
+            source, SUBTITLES_MARKUP, source_url="wiki"
+        )
+
+        assert parsed == []
+
+
 class TestArticleParser:
     def test_lead_becomes_an_overview_record(self) -> None:
         records = parse_article()
-        overview = next(record for record in records if record.title == "Green Flu › Overview")
+        overview = next(record for record in records if record.title == "Green Flu › Обзор")
 
         assert "highly contagious" in overview.content
         assert overview.source_type is SourceType.OFFICIAL

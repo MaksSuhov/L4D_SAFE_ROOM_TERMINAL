@@ -39,6 +39,7 @@ from app.ingestion import (
     MediaWikiClient,
     ParserKind,
     QuotesParser,
+    SubtitlesParser,
     WikiCorpusBuilder,
     WikitextCleaner,
 )
@@ -425,6 +426,7 @@ def build_parsers() -> dict[ParserKind, CorpusParser]:
         ParserKind.GRAFFITI: GraffitiParser(cleaner),
         ParserKind.ARTICLE: ArticleParser(cleaner),
         ParserKind.QUOTES: QuotesParser(cleaner),
+        ParserKind.SUBTITLES: SubtitlesParser(cleaner),
     }
 
 
