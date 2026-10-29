@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: l4d_terminal_db
+    environment:
+      POSTGRES_USER: l4d
+      POSTGRES_PASSWORD: l4d
+      POSTGRES_DB: l4d_terminal
+    ports:
+      - "5432:5432"
+    volumes:
+      - l4d_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U l4d -d l4d_terminal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  l4d_pgdata:
