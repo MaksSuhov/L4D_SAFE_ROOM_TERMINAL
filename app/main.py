@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import Settings, get_settings
@@ -76,6 +77,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         debug=active_settings.debug,
         lifespan=lifespan,
     )
+    if active_settings.cors_allow_origins:
+        # The frontend is served by its own dev server (or another host), so the
+        # browser needs the API to advertise the origins it trusts.
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=active_settings.cors_allow_origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["*"],
+        )
     application.add_exception_handler(ResourceNotFoundError, handle_resource_not_found)
     application.add_exception_handler(AIServiceError, handle_ai_service_error)
     application.include_router(api_router, prefix=active_settings.api_prefix)

@@ -1,0 +1,22 @@
+{
+  "name": "l4d-safe-room-terminal-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Survivor terminal UI for the Left 4 Dead interactive safe-room API",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "lucide-vue-next": "^1.0.0",
+    "vue": "^3.5.44"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.5"
+  }
+}

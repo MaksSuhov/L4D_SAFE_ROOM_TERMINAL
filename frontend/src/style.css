@@ -1,0 +1,161 @@
+@import 'tailwindcss';
+
+/* ---------------------------------------------------------------------------
+   Terminal palette.
+
+   The safe room runs on a dying phosphor display: near-black steel for the
+   chassis, amber for the machine's own voice, green for data coming back from
+   the archive, and dried blood for failures.
+   --------------------------------------------------------------------------- */
+@theme {
+  --font-sans:
+    'JetBrains Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+    'Liberation Mono', monospace;
+  --font-mono:
+    'JetBrains Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+    'Liberation Mono', monospace;
+
+  --color-bunker-950: #07080a;
+  --color-bunker-900: #0c0e11;
+  --color-bunker-800: #12161a;
+  --color-bunker-700: #1b2126;
+
+  --color-term-amber: #ffb000;
+  --color-term-green: #35e07f;
+  --color-term-blood: #e0524a;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--color-bunker-950);
+    background-image:
+      radial-gradient(ellipse 90% 60% at 50% -10%, rgba(255, 176, 0, 0.07), transparent 70%),
+      radial-gradient(ellipse 70% 50% at 50% 110%, rgba(53, 224, 127, 0.05), transparent 70%);
+    color: var(--color-zinc-300);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background-color: rgba(255, 176, 0, 0.28);
+    color: #fff;
+  }
+
+  /* A keyboard user must always see where they are. */
+  :focus-visible {
+    outline: 1px solid rgba(255, 176, 0, 0.6);
+    outline-offset: 2px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   CRT shell: scan lines and the darkened corners of a worn-out monitor.
+   --------------------------------------------------------------------------- */
+.crt-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.022) 0 1px,
+    transparent 1px 3px
+  );
+}
+
+.crt-overlay::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  /* Kept shallow on purpose: a heavier vignette swallows the transcript. */
+  background-image: radial-gradient(
+    ellipse at center,
+    transparent 68%,
+    rgba(6, 7, 9, 0.34) 100%
+  );
+}
+
+.text-glow-amber {
+  text-shadow: 0 0 10px rgba(255, 176, 0, 0.4);
+}
+
+.text-glow-green {
+  text-shadow: 0 0 10px rgba(53, 224, 127, 0.35);
+}
+
+/* ---------------------------------------------------------------------------
+   Scrollbars and entrance animations.
+   --------------------------------------------------------------------------- */
+.scrollbar-terminal {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 176, 0, 0.28) transparent;
+}
+
+.scrollbar-terminal::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scrollbar-terminal::-webkit-scrollbar-track {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+.scrollbar-terminal::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 176, 0, 0.24);
+}
+
+.scrollbar-terminal::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 176, 0, 0.4);
+}
+
+@keyframes terminal-entry {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.message-entry {
+  animation: terminal-entry 260ms ease-out both;
+}
+
+@keyframes cursor-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.cursor-blink {
+  animation: cursor-blink 1.1s steps(1, end) infinite;
+}
+
+.pop-enter-active,
+.pop-leave-active {
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.pop-enter-from,
+.pop-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-entry,
+  .cursor-blink {
+    animation: none;
+  }
+}

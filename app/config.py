@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Final
+from typing import Annotated, Final
 
 from pydantic import AliasChoices, Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 DEFAULT_EMBEDDING_DIMENSIONS: Final[int] = 1536
 """Dimension of ``text-embedding-3-small`` vectors, also used by the pgvector column."""
@@ -38,6 +38,14 @@ class Settings(BaseSettings):
         default="/api/v1",
         description="Prefix for every route; set to an empty string to serve routes from the root.",
     )
+    cors_allow_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"],
+        description=(
+            "Browser origins allowed to call the API. The default covers the Vite dev "
+            "server of the bundled frontend; pass a comma-separated list to override."
+        ),
+    )
+
     # --- Database --------------------------------------------------------
     database_url: str = Field(
         default="postgresql+asyncpg://l4d:l4d@localhost:5432/l4d_terminal",
@@ -175,6 +183,14 @@ class Settings(BaseSettings):
         """Accept ``api/v1``, ``/api/v1`` and ``/api/v1/`` and store ``/api/v1``."""
         stripped = value.strip().strip("/")
         return f"/{stripped}" if stripped else ""
+
+    @field_validator("cors_allow_origins", mode="before")
+    @classmethod
+    def _split_origins(cls, value: object) -> object:
+        """Accept ``a,b``, ``a, b`` or a JSON list and normalise it to a list."""
+        if isinstance(value, str):
+            return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
 
     @property
     def is_ai_configured(self) -> bool:
