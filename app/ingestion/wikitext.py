@@ -37,8 +37,44 @@ ATTRIBUTE_PATTERN = re.compile(
 )
 BLANK_LINE_RUN = re.compile(r"\n{3,}")
 INLINE_SPACE_RUN = re.compile(r"[ \t]{2,}")
+EMPTY_PARENTHESES_PATTERN = re.compile(r"[(\[]\s*[)\]]")
+"""Brackets left empty by a dropped template, e.g. ``Зелёный грипп ()``.
 
-DROPPED_MEDIA_PREFIXES = ("file:", "image:", "category:", "w:", "wikipedia:")
+A template such as ``{{lang-en|Green Flu}}`` is furniture, but the parentheses
+around it belong to the sentence, so removing the template leaves a hollow pair
+that reads like a fact that went missing.
+"""
+
+STRAY_MARKUP_PATTERN = re.compile(r"\[\[|\]\]|\{\{|\}\}")
+"""Doubled brackets that survived link and template resolution.
+
+The wiki is hand-written and occasionally typos a link — ``[[штурмовая
+винтовка]]M16]]`` — which leaves a loose ``]]`` glued to the next word. Once
+links and templates are resolved, a doubled bracket can only be debris.
+"""
+
+INTERWIKI_PREFIX_PATTERN = re.compile(r"^[a-z]{2,3}:")
+"""A language or interwiki link target such as ``en:Carriers`` or ``es:La Batalla Final``.
+
+Every Fandom article ends with a block of these, and they carry no lore: kept,
+each page contributes a record that is nothing but link names, which then
+competes for an evidence slot it can never fill. The wiki's own article titles
+are Cyrillic or namespace-prefixed, so a two- or three-letter Latin prefix is
+always a link, never a subject.
+"""
+
+DROPPED_MEDIA_PREFIXES = (
+    "file:",
+    "image:",
+    "category:",
+    "w:",
+    "wikipedia:",
+    # The Russian wiki uses localised namespaces, and a link to ``Файл:`` that
+    # slips through would put a caption into the corpus as if it were lore.
+    "файл:",
+    "изображение:",
+    "категория:",
+)
 
 INFOBOX_PREFIX = "infobox"
 """Templates whose name starts with this are data, not layout, and are kept.
@@ -233,11 +269,17 @@ def _resolve_links(text: str) -> str:
 
 
 def _link_label(inner: str) -> str:
-    """Return the visible text of one link target, or an empty string to drop it."""
-    parts = inner.split("|")
+    """Return the visible text of one link target, or an empty string to drop it.
+
+    The parameters are split on *top-level* pipes only: a file link whose
+    caption contains another link — ``[[Файл:x.png|thumb|Склад [[Боеприпасы|…]]]]``
+    — would otherwise be torn apart by a naive split, leaking the tail of the
+    caption into the corpus with a stray ``]]`` attached.
+    """
+    parts = _split_template_parameters(inner)
     target = parts[0].strip()
     lowered = target.lower()
-    if lowered.startswith(DROPPED_MEDIA_PREFIXES):
+    if lowered.startswith(DROPPED_MEDIA_PREFIXES) or INTERWIKI_PREFIX_PATTERN.match(lowered):
         return ""
     if len(parts) > 1:
         label = parts[-1].strip()
@@ -294,6 +336,8 @@ class WikitextCleaner:
         text = EMPHASIS_BOLD_ITALIC_PATTERN.sub("", text)
         text = BOLD_PATTERN.sub("", text)
         text = ITALIC_PATTERN.sub("", text)
+        text = STRAY_MARKUP_PATTERN.sub("", text)
+        text = EMPTY_PARENTHESES_PATTERN.sub("", text)
         text = MAGIC_WORD_PATTERN.sub(" ", text)
         text = html.unescape(text).replace("\xa0", " ")
         return self._tidy(text)
