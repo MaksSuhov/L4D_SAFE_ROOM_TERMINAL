@@ -18,7 +18,7 @@ from app.database import Database
 from app.exceptions import AIServiceError
 from app.interfaces import AIClientProtocol
 from app.repositories import CharacterRepository, LoreChunkRepository
-from app.services import RAGService
+from app.services import ArchivePromptBuilder, RAGService, RetrievalPolicy, TierPolicy
 
 
 async def get_database(request: Request) -> Database:
@@ -59,9 +59,20 @@ def get_lore_chunk_repository(
     return LoreChunkRepository(session)
 
 
+def get_prompt_builder() -> ArchivePromptBuilder:
+    """Return the renderer of the tiered archive brief.
+
+    It is stateless, so a single instance could serve the whole process; the
+    provider keeps the dependency graph uniform and makes it trivial to swap in
+    a different prompt policy from a test.
+    """
+    return ArchivePromptBuilder()
+
+
 def get_rag_service(
     character_repository: Annotated[CharacterRepository, Depends(get_character_repository)],
     lore_chunk_repository: Annotated[LoreChunkRepository, Depends(get_lore_chunk_repository)],
+    prompt_builder: Annotated[ArchivePromptBuilder, Depends(get_prompt_builder)],
     ai_client: Annotated[AIClientProtocol, Depends(get_ai_client)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> RAGService:
@@ -69,9 +80,22 @@ def get_rag_service(
     return RAGService(
         character_repository,
         lore_chunk_repository,
+        prompt_builder,
         ai_client,
-        top_k=settings.rag_top_k,
-        min_similarity=settings.rag_min_similarity,
+        policy=RetrievalPolicy(
+            official=TierPolicy(
+                limit=settings.rag_official_top_k,
+                min_similarity=settings.rag_min_similarity,
+            ),
+            graffiti=TierPolicy(
+                limit=settings.rag_graffiti_top_k,
+                min_similarity=settings.rag_min_similarity,
+            ),
+            voice=TierPolicy(
+                limit=settings.rag_voice_top_k,
+                min_similarity=settings.rag_voice_min_similarity,
+            ),
+        ),
     )
 
 

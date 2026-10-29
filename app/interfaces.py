@@ -13,6 +13,7 @@ from typing import NamedTuple, Protocol
 
 from app.models import Character, LoreChunk
 from app.schemas import EmbeddedLoreChunk
+from app.taxonomy import SourceType
 
 
 class RetrievedChunk(NamedTuple):
@@ -50,9 +51,17 @@ class LoreChunkRepositoryProtocol(Protocol):
         query_embedding: Sequence[float],
         *,
         limit: int,
-        data_type: str | None = None,
+        source_types: Sequence[SourceType] | None = None,
+        topic: str | None = None,
+        character_name: str | None = None,
     ) -> Sequence[RetrievedChunk]:
-        """Return the ``limit`` closest chunks ordered by descending similarity."""
+        """Return the ``limit`` closest chunks ordered by descending similarity.
+
+        ``source_types`` restricts the search to one or more evidence tiers,
+        which is what makes the two-level retrieval possible: the facts are
+        looked up among the official records while the rumours are looked up
+        among the graffiti.
+        """
         ...
 
     async def existing_content_hashes(self, hashes: Sequence[str]) -> set[str]:

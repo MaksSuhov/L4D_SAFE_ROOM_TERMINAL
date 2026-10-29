@@ -1,8 +1,8 @@
 """End-to-end tests against a real PostgreSQL + pgvector instance.
 
 The OpenAI API is replaced by a local HTTP stub, so the whole stack — routers,
-dependency injection, RAG service, repositories, pgvector search and the SQLAlchemy
-engine — runs for real without network access or an API key.
+dependency injection, RAG service, prompt builder, repositories, pgvector search
+and the SQLAlchemy engine — runs for real without network access or an API key.
 
 The module provisions its own ``<database>_test`` database and is skipped when no
 PostgreSQL server is reachable, which keeps ``pytest`` green on a bare machine:
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import threading
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -30,7 +30,9 @@ from app.database import Database
 from app.main import create_app, lifespan
 from app.models import LoreChunk
 from app.repositories import CharacterRepository, LoreChunkRepository
-from app.services import LoreIngestionService, OpenAIClient
+from app.schemas import EmbeddedLoreChunk, LoreChunkCreate
+from app.services import LoreIngestionService, OpenAIClient, content_hash
+from app.taxonomy import LoreTopic, SourceType
 from seed import DatabaseSeeder
 
 EMBEDDING_SIZE = 1536
@@ -38,6 +40,11 @@ MOCK_ANSWER = "Aw man, a Tank? Get a wall behind you and light it up."
 CHAT_PATH = "/chat"
 CHARACTERS_PATH = "/characters"
 HEALTH_PATH = "/health"
+
+TANK_FACT = "Танк — Особый заражённый: у него около 4000 единиц здоровья."
+WITCH_FACT = "Ведьма нападает на того, кто её потревожит."
+WALL_RUMOUR = "На стене убежища написано, что это правительство нас травит."
+VOICE_SAMPLE = "Эллис: Мы отличная команда, чувак!"
 
 
 def unit_vector(axis: int, size: int = EMBEDDING_SIZE) -> list[float]:
@@ -51,18 +58,52 @@ def topic_embedding(text_value: str) -> list[float]:
     """Map a text to a basis vector so that retrieval order is meaningful.
 
     Texts about the same subject land on the same axis, which gives a cosine
-    similarity of 1.0 for a matching query and 0.0 for an unrelated one.
+    similarity of 1.0 for a matching query and 0.0 for an unrelated one. The
+    axes are placed far apart so that each evidence tier lands on its own.
     """
     lowered = text_value.lower()
-    if "tank" in lowered:
+    if "tank" in lowered or "танк" in lowered:
         axis = 0
-    elif "witch" in lowered:
+    elif "witch" in lowered or "ведьм" in lowered:
         axis = 1
-    elif "safe room" in lowered:
+    elif "safe room" in lowered or "убежищ" in lowered or "стене" in lowered:
         axis = 2
-    else:
+    elif "virus" in lowered or "вирус" in lowered:
         axis = 3
+    else:
+        axis = 4
     return unit_vector(axis)
+
+
+def corpus() -> list[LoreChunkCreate]:
+    """A miniature corpus holding a record of every evidence tier."""
+    return [
+        LoreChunkCreate(
+            content=TANK_FACT,
+            source_type=SourceType.OFFICIAL,
+            topic=LoreTopic.INFECTED,
+            title="Танк › Обзор",
+        ),
+        LoreChunkCreate(
+            content=WITCH_FACT,
+            source_type=SourceType.OFFICIAL,
+            topic=LoreTopic.INFECTED,
+            title="Ведьма › Обзор",
+        ),
+        LoreChunkCreate(
+            content=WALL_RUMOUR,
+            source_type=SourceType.GRAFFITI,
+            topic=LoreTopic.GRAFFITI,
+            title="No Mercy › The Subway",
+        ),
+        LoreChunkCreate(
+            content=VOICE_SAMPLE,
+            source_type=SourceType.VOICE,
+            topic=LoreTopic.QUOTES,
+            title="Эллис · General",
+            character_name="Эллис",
+        ),
+    ]
 
 
 class _MockOpenAIHandler(BaseHTTPRequestHandler):
@@ -76,15 +117,18 @@ class _MockOpenAIHandler(BaseHTTPRequestHandler):
         type(self).requests.append({"path": self.path, "payload": payload})
 
         if self.path.endswith("/embeddings"):
+            sent = payload.get("input", "")
+            texts = sent if isinstance(sent, list) else [sent]
             body: dict[str, Any] = {
                 "object": "list",
                 "model": payload.get("model", "text-embedding-3-small"),
                 "data": [
                     {
                         "object": "embedding",
-                        "index": 0,
-                        "embedding": topic_embedding(str(payload.get("input", ""))),
+                        "index": index,
+                        "embedding": topic_embedding(str(value)),
                     }
+                    for index, value in enumerate(texts)
                 ],
                 "usage": {"prompt_tokens": 1, "total_tokens": 1},
             }
@@ -182,8 +226,8 @@ async def seeded_settings(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Sett
 
     with MockOpenAIServer() as server:
         monkeypatch.setenv("DATABASE_URL", integration_url)
-        monkeypatch.setenv("OPENAI_API_KEY", "sk-mock-key")
-        monkeypatch.setenv("OPENAI_BASE_URL", server.base_url)
+        monkeypatch.setenv("AI_API_KEY", "sk-mock-key")
+        monkeypatch.setenv("AI_BASE_URL", server.base_url)
         monkeypatch.setenv("API_PREFIX", "/api/v1")
         get_settings.cache_clear()
         settings = get_settings()
@@ -200,8 +244,8 @@ async def seeded_settings(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Sett
                     lore_chunk_repository=lore_repository,
                     lore_ingestion_service=LoreIngestionService(lore_repository, ai_client),
                 )
-                await seeder.run()
-                await seeder.run()  # second run must be a no-op
+                await seeder.run(documents=corpus())
+                await seeder.run(documents=corpus())  # second run must be a no-op
 
             yield settings
         finally:
@@ -223,11 +267,20 @@ async def test_seed_creates_personas_lore_and_hnsw_index(seeded_settings: Settin
     try:
         async with database.session() as session:
             characters = await CharacterRepository(session).get_all()
-            lore_chunks = await LoreChunkRepository(session).count()
+            lore_repository = LoreChunkRepository(session)
 
-            assert [character.name for character in characters] == ["Ellis", "Bill"]
+            assert [character.name for character in characters] == [
+                "Эллис",
+                "Ник",
+                "Рошель",
+                "Тренер",
+                "Билл",
+                "Фрэнсис",
+                "Луис",
+                "Зои",
+            ]
             assert len(characters[0].few_shot_examples) == 2
-            assert lore_chunks == 6
+            assert await lore_repository.count() == len(corpus())
 
             index_definition = await session.scalar(
                 text(
@@ -242,6 +295,48 @@ async def test_seed_creates_personas_lore_and_hnsw_index(seeded_settings: Settin
         await database.dispose()
 
 
+async def test_seeding_twice_does_not_duplicate_records(seeded_settings: Settings) -> None:
+    """The fixture already ran the seeder twice; the corpus must be stored once."""
+    database = Database(seeded_settings)
+    try:
+        async with database.session() as session:
+            assert await LoreChunkRepository(session).count() == len(corpus())
+    finally:
+        await database.dispose()
+
+
+async def test_personas_are_updated_in_place(seeded_settings: Settings) -> None:
+    """Editing a persona must take effect without dropping the database."""
+    from seed import CHARACTER_SEEDS, DatabaseSeeder
+
+    database = Database(seeded_settings)
+    try:
+        async with database.session() as session:
+            characters = CharacterRepository(session)
+            before = await characters.get_by_name("Эллис")
+            assert before is not None
+            before.system_prompt = "устаревшая персона"
+
+            lore_repository = LoreChunkRepository(session)
+            await DatabaseSeeder(
+                database=database,
+                character_repository=characters,
+                lore_chunk_repository=lore_repository,
+                lore_ingestion_service=LoreIngestionService(
+                    lore_repository, OpenAIClient(seeded_settings)
+                ),
+            )._seed_characters()
+
+        async with database.session() as session:
+            refreshed = await CharacterRepository(session).get_by_name("Эллис")
+            assert refreshed is not None
+            assert refreshed.system_prompt == next(
+                seed["system_prompt"] for seed in CHARACTER_SEEDS if seed["name"] == "Эллис"
+            )
+    finally:
+        await database.dispose()
+
+
 async def test_vector_search_orders_chunks_by_cosine_similarity(
     seeded_settings: Settings,
 ) -> None:
@@ -249,21 +344,17 @@ async def test_vector_search_orders_chunks_by_cosine_similarity(
     try:
         async with database.session() as session:
             repository = LoreChunkRepository(session)
+            # A topic no seeded record uses, so the crafted vectors are the only
+            # candidates and their order is not disturbed by ties with the corpus.
             await repository.create_chunk(
-                content="orthogonal to the query",
-                data_type="integration",
-                embedding=unit_vector(1),
+                embedded_record("orthogonal to the query", unit_vector(1), isolated=True)
             )
             await repository.create_chunk(
-                content="identical to the query",
-                data_type="integration",
-                embedding=unit_vector(0),
+                embedded_record("identical to the query", unit_vector(0), isolated=True)
             )
 
             matches = await repository.search_similar_chunks(
-                unit_vector(0),
-                limit=2,
-                data_type="integration",
+                unit_vector(0), limit=2, topic=str(LoreTopic.SAFE_ROOMS)
             )
 
             assert [match.chunk.content for match in matches] == [
@@ -273,13 +364,47 @@ async def test_vector_search_orders_chunks_by_cosine_similarity(
             assert matches[0].similarity == pytest.approx(1.0)
             assert matches[1].similarity == pytest.approx(0.0)
 
-            filtered = await repository.search_similar_chunks(
-                unit_vector(0),
-                limit=10,
-                data_type="environment",
+            official_only = await repository.search_similar_chunks(
+                unit_vector(0), limit=10, source_types=[SourceType.OFFICIAL]
             )
-            assert len(filtered) == 1
-            assert filtered[0].chunk.content.startswith("A safe room is the only")
+            tiers = {match.chunk.source_type for match in official_only}
+            assert tiers == {str(SourceType.OFFICIAL)}
+    finally:
+        await database.dispose()
+
+
+async def test_vector_search_can_be_narrowed_to_one_character(
+    seeded_settings: Settings,
+) -> None:
+    database = Database(seeded_settings)
+    try:
+        async with database.session() as session:
+            repository = LoreChunkRepository(session)
+
+            matches = await repository.search_similar_chunks(
+                unit_vector(0), limit=10, character_name="Эллис"
+            )
+            assert [match.chunk.content for match in matches] == [VOICE_SAMPLE]
+
+            nobody = await repository.search_similar_chunks(
+                unit_vector(0), limit=10, character_name="Ник"
+            )
+            assert nobody == []
+    finally:
+        await database.dispose()
+
+
+async def test_existing_hashes_report_what_is_stored(seeded_settings: Settings) -> None:
+    database = Database(seeded_settings)
+    try:
+        async with database.session() as session:
+            repository = LoreChunkRepository(session)
+
+            found = await repository.existing_content_hashes(
+                [content_hash(TANK_FACT), content_hash("текст, которого нет")]
+            )
+
+            assert found == {content_hash(TANK_FACT)}
     finally:
         await database.dispose()
 
@@ -305,17 +430,28 @@ async def test_chat_endpoint_runs_the_full_pipeline(
             )
 
     assert health.json()["database"] == "ok"
-    assert [character["name"] for character in characters.json()] == ["Ellis", "Bill"]
+    assert [character["name"] for character in characters.json()] == [
+        "Эллис",
+        "Ник",
+        "Рошель",
+        "Тренер",
+        "Билл",
+        "Фрэнсис",
+        "Луис",
+        "Зои",
+    ]
 
     assert chat.status_code == 200
     payload = chat.json()
-    assert payload["character_name"] == "Ellis"
+    assert payload["character_name"] == "Эллис"
     assert payload["answer"] == MOCK_ANSWER
-    assert len(payload["sources"]) == seeded_settings.rag_top_k
-    # The question mentions a Tank, so the two Tank records of the archive are
-    # retrieved first and the assistant is given them as facts.
-    assert payload["sources"][0]["similarity"] == pytest.approx(1.0)
-    assert "The Tank is the rarest Special Infected" in payload["sources"][0]["content"]
+
+    # The question mentions a Tank, so the Tank record of the official tier is
+    # retrieved at full similarity and offered to the assistant as a fact.
+    official = [source for source in payload["sources"] if source["source_type"] == "official"]
+    assert official[0]["similarity"] == pytest.approx(1.0)
+    assert official[0]["content"] == TANK_FACT
+    assert official[0]["title"] == "Танк › Обзор"
 
     assert missing.status_code == 404
 
@@ -325,7 +461,10 @@ async def test_chat_endpoint_runs_the_full_pipeline(
     assert len(chat_requests) == 1
     messages = chat_requests[0]["payload"]["messages"]
     assert messages[0]["role"] == "system"
-    assert messages[0]["content"].startswith("You are Ellis")
+    assert messages[0]["content"].startswith("Ты — Эллис")
+    # The configured language instruction is appended to the persona prompt, so
+    # the answer is always Russian regardless of the question language.
+    assert seeded_settings.answer_language_instruction in messages[0]["content"]
     assert [message["role"] for message in messages] == [
         "system",
         "system",
@@ -336,10 +475,15 @@ async def test_chat_endpoint_runs_the_full_pipeline(
         "user",
     ]
 
-    archive_message = messages[1]["content"]
-    assert "<archive_records>" in archive_message
-    for position, source in enumerate(payload["sources"], start=1):
-        assert f"{position}. [{source['data_type']}] {source['content']}" in archive_message
+    brief = messages[1]["content"]
+    assert "<official_lore>" in brief
+    assert "<wall_graffiti>" in brief
+    assert "<speech_samples>" in brief
+    assert TANK_FACT in brief
+    assert WALL_RUMOUR in brief
+    assert VOICE_SAMPLE in brief
+    # Tier separation: the wall inscription must never sit in the factual block.
+    assert WALL_RUMOUR not in brief.split("<wall_graffiti>")[0]
 
     assert messages[-1] == {"role": "user", "content": "Tank inbound?"}
 
@@ -349,9 +493,7 @@ async def test_lore_chunk_round_trips_its_embedding(seeded_settings: Settings) -
     try:
         async with database.session() as session:
             stored = await LoreChunkRepository(session).create_chunk(
-                content="embedding round trip",
-                data_type="monster",
-                embedding=unit_vector(7),
+                embedded_record("embedding round trip", unit_vector(7))
             )
             chunk_id = stored.id
 
@@ -363,3 +505,24 @@ async def test_lore_chunk_round_trips_its_embedding(seeded_settings: Settings) -
             assert len(reloaded.embedding) == EMBEDDING_SIZE
     finally:
         await database.dispose()
+
+
+def embedded_record(
+    content: str,
+    embedding: Sequence[float],
+    *,
+    isolated: bool = False,
+) -> EmbeddedLoreChunk:
+    """Build a storable record around a hand-made vector.
+
+    ``isolated`` parks the record under a topic no corpus record uses, which
+    keeps a test about vector ordering independent of the seeded data.
+    """
+    return EmbeddedLoreChunk(
+        content=content,
+        source_type=SourceType.OFFICIAL,
+        topic=LoreTopic.SAFE_ROOMS if isolated else LoreTopic.INFECTED,
+        title="Integration",
+        content_hash=content_hash(content),
+        embedding=list(embedding),
+    )

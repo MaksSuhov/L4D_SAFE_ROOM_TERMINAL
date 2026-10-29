@@ -141,12 +141,32 @@ class Settings(BaseSettings):
     )
 
     # --- Retrieval augmented generation ----------------------------------
-    rag_top_k: int = Field(default=3, ge=1, le=20)
+    # Retrieval is tiered: verified lore and wall graffiti are looked up
+    # separately, each with its own budget, so a rumour can never crowd out a
+    # fact (or the other way round).
+    rag_official_top_k: int = Field(default=4, ge=0, le=20)
+    rag_graffiti_top_k: int = Field(default=3, ge=0, le=20)
+    rag_voice_top_k: int = Field(default=2, ge=0, le=10)
     rag_min_similarity: float = Field(
-        default=0.15,
+        default=0.25,
         ge=-1.0,
         le=1.0,
-        description="Cosine similarity floor; chunks below it are not passed to the model.",
+        description=(
+            "Cosine similarity floor for the evidence tiers (lore and graffiti); "
+            "weaker matches are dropped instead of being passed to the model. "
+            "Slightly above the noise level of text-embedding-3-small, where "
+            "unrelated texts rarely pass 0.2."
+        ),
+    )
+    rag_voice_min_similarity: float = Field(
+        default=0.0,
+        ge=-1.0,
+        le=1.0,
+        description=(
+            "Floor for the character's own lines. They are a style reference rather "
+            "than evidence, so the most relevant ones are passed on even when the "
+            "question is unrelated to what they were recorded for."
+        ),
     )
 
     @field_validator("api_prefix")

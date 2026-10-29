@@ -20,6 +20,7 @@ from app.interfaces import (
 )
 from app.models import Character, LoreChunk
 from app.schemas import EmbeddedLoreChunk
+from app.taxonomy import SourceType
 
 ModelT = TypeVar("ModelT", bound=Base)
 
@@ -100,7 +101,9 @@ class LoreChunkRepository(BaseRepository[LoreChunk], LoreChunkRepositoryProtocol
         query_embedding: Sequence[float],
         *,
         limit: int,
-        data_type: str | None = None,
+        source_types: Sequence[SourceType] | None = None,
+        topic: str | None = None,
+        character_name: str | None = None,
     ) -> Sequence[RetrievedChunk]:
         """Return the ``limit`` nearest chunks ordered by descending cosine similarity.
 
@@ -112,8 +115,14 @@ class LoreChunkRepository(BaseRepository[LoreChunk], LoreChunkRepositoryProtocol
             "cosine_distance"
         )
         statement = select(LoreChunk, distance).order_by(distance).limit(limit)
-        if data_type is not None:
-            statement = statement.where(LoreChunk.data_type == data_type)
+        if source_types is not None:
+            statement = statement.where(
+                LoreChunk.source_type.in_([str(source_type) for source_type in source_types])
+            )
+        if topic is not None:
+            statement = statement.where(LoreChunk.topic == topic)
+        if character_name is not None:
+            statement = statement.where(LoreChunk.character_name == character_name)
 
         result = await self._session.execute(statement)
         return [
