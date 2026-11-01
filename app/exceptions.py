@@ -29,3 +29,7 @@ class CharacterNotFoundError(ResourceNotFoundError):
 
 class AIServiceError(ApplicationError):
     """Raised when the OpenAI provider fails or is misconfigured."""
+
+
+class EvaluationError(ApplicationError):
+    """Raised when the evaluation harness cannot read a case or score an answer."""
