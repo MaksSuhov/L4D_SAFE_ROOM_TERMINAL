@@ -24,6 +24,11 @@ node_modules/
 # from is not, because it is bulky and can be re-fetched with `make corpus-refresh`.
 data/wiki_cache/
 
+# Evaluation tooling
+# The question set (data/eval/questions.jsonl) is committed: it is the fixture the
+# harness reads. Reports are produced by `make eval` and are not tracked.
+data/eval/report*.json
+
 # Tooling
 .DS_Store
 .idea/

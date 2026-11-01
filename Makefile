@@ -12,7 +12,7 @@ FRONTEND := frontend
 
 .PHONY: help install install-python install-frontend db db-down seed seed-reset \
 	reingest corpus-refresh corpus-translate assets dev dev-backend dev-frontend test lint typecheck \
-	check build clean
+	eval check build clean
 
 help: ## Показать доступные команды
 	@printf '\nSafe-Room Terminal\n\n'
@@ -65,6 +65,9 @@ dev-frontend: ## Запустить только фронтенд
 
 test: ## Прогнать тесты бэкенда
 	$(PYTHON) -m pytest
+
+eval: ## Оценить качество ответов LLM-судьёй (нужны поднятая база, корпус и AI_API_KEY)
+	$(PYTHON) -m scripts.evaluate
 
 lint: ## Проверить код линтером ruff
 	$(PYTHON) -m ruff check .
