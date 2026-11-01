@@ -8,6 +8,7 @@ from app.interfaces import (
     AIClientProtocol,
     CharacterRepositoryProtocol,
     LoreChunkRepositoryProtocol,
+    PreparedChat,
     RetrievedChunk,
 )
 from app.schemas import ChatResponse, LoreSource
@@ -82,6 +83,30 @@ class RAGService:
 
     async def process_chat_message(self, character_id: int, user_message: str) -> ChatResponse:
         """Answer ``user_message`` as the character identified by ``character_id``."""
+        prepared = await self.build_chat_context(character_id, user_message)
+
+        answer = await self._ai_client.generate_response(
+            system_prompt=prepared.system_prompt,
+            context=prepared.context,
+            user_message=user_message,
+            few_shot_examples=prepared.few_shot_examples,
+        )
+
+        return ChatResponse(
+            character_id=prepared.character_id,
+            character_name=prepared.character_name,
+            answer=answer,
+            model=prepared.model,
+            sources=list(prepared.sources),
+        )
+
+    async def build_chat_context(self, character_id: int, user_message: str) -> PreparedChat:
+        """Run retrieval for one message and return everything generation needs.
+
+        The retrieval half of the pipeline, exposed on its own: the HTTP route
+        uses it indirectly, while the evaluation harness uses it directly so it
+        can stream the answer and time the first token.
+        """
         character = await self._characters.get_by_id(character_id)
         if character is None:
             raise CharacterNotFoundError(character_id)
@@ -89,18 +114,13 @@ class RAGService:
         query_embedding = await self._ai_client.get_embedding(user_message)
         evidence = await self._retrieve_evidence(query_embedding, character.name)
 
-        answer = await self._ai_client.generate_response(
-            system_prompt=character.system_prompt,
-            context=self._prompt_builder.build(evidence),
-            user_message=user_message,
-            few_shot_examples=character.few_shot_examples,
-        )
-
-        return ChatResponse(
+        return PreparedChat(
             character_id=character.id,
             character_name=character.name,
-            answer=answer,
             model=self._ai_client.model_name,
+            system_prompt=character.system_prompt,
+            context=self._prompt_builder.build(evidence),
+            few_shot_examples=character.few_shot_examples,
             sources=self._build_sources(evidence.all_chunks),
         )
 

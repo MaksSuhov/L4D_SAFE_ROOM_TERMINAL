@@ -6,7 +6,7 @@ against these fakes without PostgreSQL, pgvector or network access.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 
 from app.interfaces import RetrievedChunk
 from app.models import Character, LoreChunk
@@ -178,11 +178,20 @@ class FakeAIClient:
 
     model_name = "fake-model"
 
-    def __init__(self, *, answer: str = "Stay behind the wall, kids.") -> None:
+    def __init__(
+        self,
+        *,
+        answer: str = "Stay behind the wall, kids.",
+        stream_fragments: Sequence[str] | None = None,
+        completion: str = "{}",
+    ) -> None:
         self._answer = answer
+        self._stream_fragments = list(stream_fragments) if stream_fragments is not None else None
+        self._completion = completion
         self.embedded_texts: list[str] = []
         self.translated_texts: list[str] = []
         self.generation_calls: list[dict[str, object]] = []
+        self.completion_calls: list[dict[str, object]] = []
 
     async def get_embedding(self, text: str) -> list[float]:
         return (await self.get_embeddings([text]))[0]
@@ -202,6 +211,46 @@ class FakeAIClient:
         user_message: str,
         few_shot_examples: Sequence[Mapping[str, str]] | None = None,
     ) -> str:
+        self._record_generation(system_prompt, context, user_message, few_shot_examples)
+        return self._answer
+
+    async def stream_response(
+        self,
+        system_prompt: str,
+        context: str,
+        user_message: str,
+        few_shot_examples: Sequence[Mapping[str, str]] | None = None,
+    ) -> AsyncIterator[str]:
+        self._record_generation(system_prompt, context, user_message, few_shot_examples)
+        fragments = self._stream_fragments
+        if fragments is None:
+            fragments = [self._answer]
+        for fragment in fragments:
+            yield fragment
+
+    async def complete(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        temperature: float = 0.0,
+    ) -> str:
+        self.completion_calls.append(
+            {
+                "system_prompt": system_prompt,
+                "user_message": user_message,
+                "temperature": temperature,
+            }
+        )
+        return self._completion
+
+    def _record_generation(
+        self,
+        system_prompt: str,
+        context: str,
+        user_message: str,
+        few_shot_examples: Sequence[Mapping[str, str]] | None,
+    ) -> None:
         self.generation_calls.append(
             {
                 "system_prompt": system_prompt,
@@ -210,4 +259,21 @@ class FakeAIClient:
                 "few_shot_examples": list(few_shot_examples or ()),
             }
         )
-        return self._answer
+
+
+class FakeClock:
+    """Clock that advances by a fixed step on every reading.
+
+    It lets the latency tests assert on exact numbers without sleeping: with a
+    step of one second, a reading taken at the start, on the first token and at
+    the end reports a one-second wait to the first token and two seconds total.
+    """
+
+    def __init__(self, *, start: float = 0.0, step: float = 0.0) -> None:
+        self._now = start
+        self._step = step
+
+    def now(self) -> float:
+        current = self._now
+        self._now += self._step
+        return current

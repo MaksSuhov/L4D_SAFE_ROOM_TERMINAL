@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from openai import AsyncOpenAI, OpenAIError
@@ -106,18 +106,70 @@ class OpenAIClient(AIClientProtocol):
         few_shot_examples: Sequence[Mapping[str, str]] | None = None,
     ) -> str:
         """Generate an in-character answer grounded in ``context``."""
-        messages: list[ChatCompletionMessageParam] = [
-            {"role": "system", "content": self._compose_system_message(system_prompt)},
-            {"role": "system", "content": self._compose_context_message(context)},
-        ]
-        messages.extend(self._compose_examples(few_shot_examples))
-        messages.append({"role": "user", "content": user_message})
+        return await self._create_completion(
+            self._compose_messages(system_prompt, context, user_message, few_shot_examples),
+            temperature=self._settings.chat_temperature,
+        )
 
+    async def stream_response(
+        self,
+        system_prompt: str,
+        context: str,
+        user_message: str,
+        few_shot_examples: Sequence[Mapping[str, str]] | None = None,
+    ) -> AsyncIterator[str]:
+        """Yield the same answer as :meth:`generate_response`, fragment by fragment."""
+        messages = self._compose_messages(
+            system_prompt, context, user_message, few_shot_examples
+        )
         try:
-            completion = await self._client.chat.completions.create(
+            stream = await self._client.chat.completions.create(
                 model=self._settings.chat_model,
                 messages=messages,
                 temperature=self._settings.chat_temperature,
+                max_tokens=self._settings.chat_max_tokens,
+                stream=True,
+            )
+        except OpenAIError as error:
+            raise AIServiceError(f"Chat completion request failed: {error}") from error
+
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            content = chunk.choices[0].delta.content
+            if content:
+                yield content
+
+    async def complete(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        temperature: float = 0.0,
+    ) -> str:
+        """Answer one instruction, without retrieval and without a persona."""
+        messages: list[ChatCompletionMessageParam] = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ]
+        return await self._create_completion(messages, temperature=temperature)
+
+    async def aclose(self) -> None:
+        """Release the underlying HTTP connection pool."""
+        await self._client.close()
+
+    async def _create_completion(
+        self,
+        messages: Sequence[ChatCompletionMessageParam],
+        *,
+        temperature: float,
+    ) -> str:
+        """Send one chat request and return its single text answer."""
+        try:
+            completion = await self._client.chat.completions.create(
+                model=self._settings.chat_model,
+                messages=list(messages),
+                temperature=temperature,
                 max_tokens=self._settings.chat_max_tokens,
             )
         except OpenAIError as error:
@@ -131,9 +183,21 @@ class OpenAIClient(AIClientProtocol):
             raise AIServiceError("Chat completion returned an empty message")
         return answer.strip()
 
-    async def aclose(self) -> None:
-        """Release the underlying HTTP connection pool."""
-        await self._client.close()
+    def _compose_messages(
+        self,
+        system_prompt: str,
+        context: str,
+        user_message: str,
+        few_shot_examples: Sequence[Mapping[str, str]] | None,
+    ) -> list[ChatCompletionMessageParam]:
+        """Build the message list shared by the buffered and the streaming paths."""
+        messages: list[ChatCompletionMessageParam] = [
+            {"role": "system", "content": self._compose_system_message(system_prompt)},
+            {"role": "system", "content": self._compose_context_message(context)},
+        ]
+        messages.extend(self._compose_examples(few_shot_examples))
+        messages.append({"role": "user", "content": user_message})
+        return messages
 
     async def _embed_batch(self, batch: Sequence[str]) -> list[list[float]]:
         """Embed one batch and return its vectors in the order of ``batch``."""

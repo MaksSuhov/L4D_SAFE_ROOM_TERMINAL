@@ -8,11 +8,12 @@ database client — can be injected instead.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from dataclasses import dataclass
 from typing import NamedTuple, Protocol
 
 from app.models import Character, LoreChunk
-from app.schemas import EmbeddedLoreChunk
+from app.schemas import EmbeddedLoreChunk, LoreSource
 from app.taxonomy import SourceType
 
 
@@ -21,6 +22,25 @@ class RetrievedChunk(NamedTuple):
 
     chunk: LoreChunk
     similarity: float
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedChat:
+    """Everything a single chat turn needs once retrieval has run.
+
+    It is the seam between the two halves of the pipeline: retrieval fills it in
+    (question -> evidence -> brief), and generation only needs what is stored
+    here. Exposing it lets a caller stream the answer and keep the evidence,
+    which is exactly what the offline evaluation harness does.
+    """
+
+    character_id: int
+    character_name: str
+    model: str
+    system_prompt: str
+    context: str
+    few_shot_examples: Sequence[Mapping[str, str]]
+    sources: Sequence[LoreSource]
 
 
 class CharacterRepositoryProtocol(Protocol):
@@ -109,4 +129,34 @@ class AIClientProtocol(Protocol):
         few_shot_examples: Sequence[Mapping[str, str]] | None = None,
     ) -> str:
         """Produce the assistant answer grounded in ``context``."""
+        ...
+
+    def stream_response(
+        self,
+        system_prompt: str,
+        context: str,
+        user_message: str,
+        few_shot_examples: Sequence[Mapping[str, str]] | None = None,
+    ) -> AsyncIterator[str]:
+        """Yield the answer piece by piece, in the order the provider sends it.
+
+        The same answer as :meth:`generate_response`, only delivered as a stream
+        of fragments. Streaming is what makes the time to the first token
+        observable: until the first fragment arrives, nothing has been produced.
+        """
+        ...
+
+    async def complete(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        temperature: float = 0.0,
+    ) -> str:
+        """Answer a single instruction, without retrieval and without personas.
+
+        A low-level entry point for tasks that only need a model reply: judging
+        an answer, classifying a text, extracting a field. The temperature is an
+        argument here because such tasks want determinism, not creativity.
+        """
         ...
