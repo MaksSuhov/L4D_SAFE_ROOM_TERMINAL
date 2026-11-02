@@ -9,6 +9,7 @@ from app.exceptions import AIServiceError, CharacterNotFoundError
 from app.interfaces import RetrievedChunk
 from app.services import (
     ArchivePromptBuilder,
+    HideQueryExpander,
     OpenAIClient,
     RAGService,
     RetrievalPolicy,
@@ -18,6 +19,7 @@ from app.services.prompt_builder import NO_OFFICIAL_LORE
 from app.taxonomy import LoreTopic, SourceType
 from tests.fakes import (
     FakeAIClient,
+    FakeQueryExpander,
     InMemoryCharacterRepository,
     InMemoryLoreChunkRepository,
     build_character,
@@ -26,6 +28,9 @@ from tests.fakes import (
 
 QUESTION = "How do we kill a Tank?"
 ANSWER = "Walls behind you, kids."
+CAMPAIGN_PROBE = "Оружие в кампании «Вымерший центр»?"
+ATRIUM_PROBE = "Что можно найти в «Атриуме»?"
+HYPOTHETICALS = [CAMPAIGN_PROBE, ATRIUM_PROBE]
 
 
 def block(context: str, header: str) -> str:
@@ -130,13 +135,15 @@ def build_service(
     similarity: float = 0.0,
     policy_override: RetrievalPolicy | None = None,
     examples: list[dict[str, str]] | None = None,
+    lore: InMemoryLoreChunkRepository | None = None,
+    expander: FakeQueryExpander | None = None,
 ) -> tuple[RAGService, InMemoryLoreChunkRepository, FakeAIClient]:
     character = build_character(few_shot_examples=examples)
-    lore = InMemoryLoreChunkRepository(tiered_matches())
+    repository = lore or InMemoryLoreChunkRepository(tiered_matches())
     ai_client = FakeAIClient(answer=ANSWER)
     service = RAGService(
         InMemoryCharacterRepository([character]),
-        lore,
+        repository,
         ArchivePromptBuilder(),
         ai_client,
         policy=policy_override
@@ -145,8 +152,25 @@ def build_service(
             graffiti=TierPolicy(limit=3, min_similarity=similarity),
             voice=TierPolicy(limit=2, min_similarity=similarity),
         ),
+        query_expander=expander,
     )
-    return service, lore, ai_client
+    return service, repository, ai_client
+
+
+def probe_keyed_repository(
+    by_probe: dict[str, list[RetrievedChunk]],
+) -> InMemoryLoreChunkRepository:
+    """Собрать архив, который отвечает по-разному на разные формулировки.
+
+    Заглушка клиента кодирует текст запроса его длиной, поэтому таблица задаётся
+    формулировками, а ключом поиска становится их длина: формулировки обязаны быть
+    разной длины, иначе заглушка их не различит.
+    """
+    by_length = {len(probe): matches for probe, matches in by_probe.items()}
+    assert len(by_length) == len(by_probe), "probes in the table must differ in length"
+    return InMemoryLoreChunkRepository(
+        matches_of=lambda embedding: by_length.get(int(embedding[0]), [])
+    )
 
 
 async def test_process_chat_message_returns_answer_with_sources() -> None:
@@ -376,6 +400,125 @@ async def test_unknown_character_fails_before_calling_the_provider() -> None:
 
     assert ai_client.embedded_texts == []
     assert ai_client.generation_calls == []
+
+
+async def test_without_an_expander_the_question_is_the_only_formulation() -> None:
+    service, lore, ai_client = build_service()
+
+    await service.process_chat_message(1, QUESTION)
+
+    assert ai_client.embedded_texts == [QUESTION]
+    assert len(lore.searches) == 3
+
+
+async def test_every_formulation_is_searched_in_every_tier() -> None:
+    expander = FakeQueryExpander(HYPOTHETICALS)
+    service, lore, ai_client = build_service(expander=expander)
+
+    await service.process_chat_message(1, QUESTION)
+
+    assert expander.questions == [QUESTION]
+    assert ai_client.embedded_texts == [QUESTION, *HYPOTHETICALS]
+    # One batched embeddings call covers every formulation, however many came back.
+    assert ai_client.embedding_calls == [[QUESTION, *HYPOTHETICALS]]
+    assert [(search["source_types"], search["limit"]) for search in lore.searches] == (
+        [([SourceType.OFFICIAL], 4)] * 3
+        + [([SourceType.GRAFFITI], 3)] * 3
+        + [([SourceType.VOICE], 2)] * 3
+    )
+
+
+async def test_a_record_reached_by_a_hypothetical_formulation_joins_the_tier() -> None:
+    """Проверить мост HIDE целиком: вопрос про Танка, а запись про арсенал «Атриума»
+    приходит только от гипотетической формулировки.
+    """
+    tank = build_chunk(chunk_id=10, content="Tank has 4000 HP.", title="Tank › Overview")
+    arsenal = build_chunk(
+        chunk_id=13,
+        content="В «Атриуме» лежит дробовик.",
+        title="Вымерший центр › Атриум",
+    )
+    lore = probe_keyed_repository(
+        {
+            QUESTION: [RetrievedChunk(tank, 0.91)],
+            CAMPAIGN_PROBE: [RetrievedChunk(arsenal, 0.68)],
+            # The same record found again by another formulation keeps one place in
+            # the budget and its best similarity.
+            ATRIUM_PROBE: [RetrievedChunk(arsenal, 0.42)],
+        }
+    )
+    service, _, ai_client = build_service(lore=lore, expander=FakeQueryExpander(HYPOTHETICALS))
+
+    response = await service.process_chat_message(1, QUESTION)
+
+    assert [(source.id, source.similarity) for source in response.sources] == [
+        (10, 0.91),
+        (13, 0.68),
+    ]
+    assert "Вымерший центр › Атриум" in str(ai_client.generation_calls[0]["context"])
+
+
+async def test_the_tier_budget_still_caps_the_fused_matches() -> None:
+    lore = probe_keyed_repository(
+        {
+            QUESTION: [RetrievedChunk(build_chunk(chunk_id=1, content="A"), 0.90)],
+            CAMPAIGN_PROBE: [RetrievedChunk(build_chunk(chunk_id=2, content="B"), 0.80)],
+            ATRIUM_PROBE: [RetrievedChunk(build_chunk(chunk_id=3, content="C"), 0.70)],
+        }
+    )
+    service, _, _ = build_service(
+        lore=lore,
+        expander=FakeQueryExpander(HYPOTHETICALS),
+        policy_override=policy(
+            official=TierPolicy(limit=2, min_similarity=0.0),
+            graffiti=TierPolicy(limit=0),
+            voice=TierPolicy(limit=0),
+        ),
+    )
+
+    response = await service.process_chat_message(1, QUESTION)
+
+    assert [source.id for source in response.sources] == [1, 2]
+
+
+async def test_the_evidence_floor_is_applied_to_every_formulation() -> None:
+    lore = probe_keyed_repository(
+        {
+            QUESTION: [RetrievedChunk(build_chunk(chunk_id=11, content="weak"), 0.18)],
+            CAMPAIGN_PROBE: [RetrievedChunk(build_chunk(chunk_id=12, content="strong"), 0.62)],
+            ATRIUM_PROBE: [],
+        }
+    )
+    service, _, _ = build_service(
+        lore=lore,
+        expander=FakeQueryExpander(HYPOTHETICALS),
+        policy_override=policy(
+            official=TierPolicy(limit=4, min_similarity=0.25),
+            graffiti=TierPolicy(limit=0),
+            voice=TierPolicy(limit=0),
+        ),
+    )
+
+    response = await service.process_chat_message(1, QUESTION)
+
+    assert [source.id for source in response.sources] == [12]
+
+
+async def test_a_failed_expansion_still_answers_from_the_question() -> None:
+    client = FakeAIClient(answer=ANSWER, completion="Извини, не могу помочь с этим.")
+    service = RAGService(
+        InMemoryCharacterRepository([build_character()]),
+        InMemoryLoreChunkRepository(tiered_matches()),
+        ArchivePromptBuilder(),
+        client,
+        query_expander=HideQueryExpander(client),
+    )
+
+    response = await service.process_chat_message(1, QUESTION)
+
+    assert client.embedded_texts == [QUESTION]
+    assert response.answer == ANSWER
+    assert [source.id for source in response.sources] == [10, 11, 12, 20, 21, 30]
 
 
 def test_openai_client_requires_an_api_key() -> None:

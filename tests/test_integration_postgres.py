@@ -229,6 +229,11 @@ async def seeded_settings(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Sett
         monkeypatch.setenv("AI_API_KEY", "sk-mock-key")
         monkeypatch.setenv("AI_BASE_URL", server.base_url)
         monkeypatch.setenv("API_PREFIX", "/api/v1")
+        # The stub answers every completion alike, so it cannot serve an expansion,
+        # and the pipeline check below counts exactly one completion per chat turn.
+        # HIDE itself is covered by the unit tests and by the HTTP test that injects
+        # a stub expander.
+        monkeypatch.setenv("HIDE_ENABLED", "false")
         get_settings.cache_clear()
         settings = get_settings()
 

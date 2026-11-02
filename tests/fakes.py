@@ -6,9 +6,9 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 
-from app.interfaces import RetrievedChunk
+from app.interfaces import ExpandedQuery, RetrievedChunk
 from app.models import Character, LoreChunk
 from app.schemas import EmbeddedLoreChunk, LoreChunkCreate
 from app.taxonomy import LoreTopic, SourceType
@@ -42,7 +42,11 @@ def build_chunk(
     title: str = "Archive",
     character_name: str | None = None,
 ) -> LoreChunk:
-    """Создать отсоединённый фрагмент лора с фиктивным эмбеддингом."""
+    """Создать отсоединённый фрагмент лора с фиктивным эмбеддингом.
+
+    Хэш выводится из идентификатора и потому уникален: по нему конвейер отличает
+    одну запись архива от другой, и заглушка обязана повторять это свойство.
+    """
     return LoreChunk(
         id=chunk_id,
         content=content,
@@ -95,10 +99,20 @@ class InMemoryLoreChunkRepository:
     Заданный список заменяет векторный индекс: настоящий репозиторий возвращает
     совпадения, упорядоченные по косинусной дистанции, и этот двойник делает так же,
     что и позволяет тестам уровней проверять бюджеты и фильтры без базы.
+
+    ``matches_of`` нужен там, где выдача обязана зависеть от формулировки: он получает
+    вектор запроса и отдаёт кандидатов именно для него, — так проверяется поиск по
+    нескольким формулировкам HIDE. Фильтры уровня при этом продолжают действовать.
     """
 
-    def __init__(self, matches: Sequence[RetrievedChunk] | None = None) -> None:
+    def __init__(
+        self,
+        matches: Sequence[RetrievedChunk] | None = None,
+        *,
+        matches_of: Callable[[Sequence[float]], Sequence[RetrievedChunk]] | None = None,
+    ) -> None:
         self._matches: list[RetrievedChunk] = list(matches or ())
+        self._matches_of = matches_of
         self.searches: list[dict[str, object]] = []
         self.stored: list[LoreChunk] = []
 
@@ -120,12 +134,15 @@ class InMemoryLoreChunkRepository:
                 "character_name": character_name,
             }
         )
-        candidates = [
+        candidates = (
+            self._matches_of(query_embedding) if self._matches_of is not None else self._matches
+        )
+        eligible = [
             match
-            for match in self._matches
+            for match in candidates
             if self._matches_filters(match, source_types, topic, character_name)
         ]
-        return candidates[:limit]
+        return eligible[:limit]
 
     async def create_chunk(self, record: EmbeddedLoreChunk) -> LoreChunk:
         chunk = self._to_chunk(len(self.stored) + 1, record)
@@ -189,6 +206,7 @@ class FakeAIClient:
         self._stream_fragments = list(stream_fragments) if stream_fragments is not None else None
         self._completion = completion
         self.embedded_texts: list[str] = []
+        self.embedding_calls: list[list[str]] = []
         self.translated_texts: list[str] = []
         self.generation_calls: list[dict[str, object]] = []
         self.completion_calls: list[dict[str, object]] = []
@@ -198,6 +216,7 @@ class FakeAIClient:
 
     async def get_embeddings(self, texts: Sequence[str]) -> list[list[float]]:
         self.embedded_texts.extend(texts)
+        self.embedding_calls.append(list(texts))
         return [[float(len(text))] * EMBEDDING_SIZE for text in texts]
 
     async def translate_texts(self, texts: Sequence[str]) -> list[str]:
@@ -259,6 +278,18 @@ class FakeAIClient:
                 "few_shot_examples": list(few_shot_examples or ()),
             }
         )
+
+
+class FakeQueryExpander:
+    """Отдаёт заранее заданные формулировки и не обращается к провайдеру."""
+
+    def __init__(self, hypotheticals: Sequence[str] | None = None) -> None:
+        self._hypotheticals = tuple(hypotheticals or ())
+        self.questions: list[str] = []
+
+    async def expand(self, question: str) -> ExpandedQuery:
+        self.questions.append(question)
+        return ExpandedQuery(original=question, hypotheticals=self._hypotheticals)
 
 
 class FakeClock:
