@@ -10,6 +10,7 @@ from openai import AsyncOpenAI, OpenAIError
 from app.config import Settings
 from app.exceptions import AIServiceError
 from app.interfaces import AIClientProtocol
+from app.services.json_array import extract_json_array
 
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only
     from openai.types.chat import ChatCompletionMessageParam
@@ -256,7 +257,7 @@ class OpenAIClient(AIClientProtocol):
         if not completion.choices:
             raise AIServiceError("Translation response did not contain any choice")
         content = completion.choices[0].message.content or ""
-        translated = self._extract_json_array(content)
+        translated = extract_json_array(content)
         if len(translated) != len(batch):
             raise AIServiceError(
                 f"Translation returned {len(translated)} items for a batch of {len(batch)}"
@@ -273,24 +274,6 @@ class OpenAIClient(AIClientProtocol):
                 logger.warning("Keeping the original text, translation failed: %s", error)
                 translations.append(text)
         return translations
-
-    @staticmethod
-    def _extract_json_array(content: str) -> list[str]:
-        """Вытащить JSON-массив строк из ответа модели, выдержав текст вокруг него."""
-        start = content.find("[")
-        end = content.rfind("]")
-        if start == -1 or end == -1 or end < start:
-            raise AIServiceError("Translation reply did not contain a JSON array")
-        try:
-            parsed = json.loads(content[start : end + 1])
-        except json.JSONDecodeError as error:
-            raise AIServiceError(f"Translation reply was not valid JSON: {error}") from error
-        if not isinstance(parsed, list):
-            raise AIServiceError("Translation reply was not a JSON array")
-        return [
-            item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)
-            for item in parsed
-        ]
 
     def _compose_system_message(self, system_prompt: str) -> str:
         """Дописать настроенную языковую инструкцию к промпту образа."""
