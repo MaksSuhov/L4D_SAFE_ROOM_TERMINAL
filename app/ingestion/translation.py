@@ -1,21 +1,21 @@
-"""Normalising the corpus language before it is embedded.
+"""Нормализация языка корпуса перед индексацией.
 
-The wiki is written in English while the terminal answers in Russian, and
-cross-language vector search is weaker than monolingual search: in a spot check
-against this very corpus a Russian question about the Green Flu scored 0.53
-against the English record but 0.74 against its Russian counterpart, with a much
-wider margin over the runner-up. Retrieval still ranked the right record first in
-every case, so the corpus is usable as it stands — but a deployment that wants
-the tighter margins can normalise the corpus once, here.
+Вики написана на английском, а терминал отвечает на русском, и межъязыковой
+векторный поиск слабее одноязычного: при точечной проверке на этом самом корпусе
+русский вопрос про «Зелёный грипп» набрал 0.53 против английской записи, но 0.74
+против её русского аналога, со значительно большим отрывом от второго места.
+Поиск всё равно ставил нужную запись первой в каждом случае, поэтому корпус
+пригоден и как есть — но развёртывание, которому нужны более тесные отрывы,
+может один раз нормализовать корпус здесь.
 
-The stage is **opt-in** (``--translate``), deliberately. It costs one chat
-completion per batch of records, and over the full corpus that is a slow pass:
-measured against the configured provider, sixteen short lines took ~21 s, and a
-single long article paragraph took ~47 s and came back untranslated. Over
-~2 300 records that is a tens-of-minutes job — reasonable as a one-off for a
-corpus that will be shipped, wrong as a hidden default for every local seed. A
-text the provider fails to translate keeps its source form rather than being
-dropped, so a partial pass degrades instead of corrupting the archive.
+Этап **opt-in** (``--translate``), намеренно. Он стоит одного chat-завершения
+на пакет записей, а на всём корпусе это медленный проход: по замерам на
+настроенном провайдере шестнадцать коротких строк заняли ~21 с, а один длинный
+абзац статьи — ~47 с и вернулся непереведённым. На ~2 300 записей это работа на
+десятки минут — разумная как разовая для корпуса, который будет отгружен, и
+неверная как скрытое значение по умолчанию для каждого локального наполнения.
+Текст, который провайдер не смог перевести, сохраняет исходную форму, а не
+отбрасывается, поэтому частичный проход ухудшает, а не портит архив.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ logger = logging.getLogger("l4d.ingestion.translation")
 
 @dataclass(frozen=True, slots=True)
 class TranslationOutcome:
-    """Result of translating a corpus."""
+    """Результат перевода корпуса."""
 
     documents: list[LoreChunkCreate]
     translated: int
@@ -40,12 +40,12 @@ class TranslationOutcome:
 
     @property
     def total(self) -> int:
-        """Number of records that went in."""
+        """Сколько записей было на входе."""
         return self.translated + self.unchanged
 
 
 class CorpusTranslator:
-    """Rewrites the ``content`` of every record in the target language."""
+    """Переписывает ``content`` каждой записи на целевой язык."""
 
     def __init__(self, ai_client: AIClientProtocol, *, target_language: str) -> None:
         self._ai_client = ai_client
@@ -53,11 +53,11 @@ class CorpusTranslator:
 
     @property
     def target_language(self) -> str:
-        """Language every record is normalised into."""
+        """Язык, к которому приводится каждая запись."""
         return self._target_language
 
     async def translate(self, documents: Sequence[LoreChunkCreate]) -> TranslationOutcome:
-        """Translate the records and report how many were actually rewritten."""
+        """Перевести записи и сообщить, сколько реально было переписано."""
         if not documents:
             return TranslationOutcome(documents=[], translated=0, unchanged=0)
 

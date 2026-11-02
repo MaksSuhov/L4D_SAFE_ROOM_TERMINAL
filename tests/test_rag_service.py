@@ -1,4 +1,4 @@
-"""Unit tests for the business-logic layer, running entirely on fakes."""
+"""Модульные тесты слоя бизнес-логики, целиком работающие на заглушках."""
 
 from __future__ import annotations
 
@@ -29,14 +29,14 @@ ANSWER = "Walls behind you, kids."
 
 
 def block(context: str, header: str) -> str:
-    """Return the body of one ``<header>…</header>`` block of the brief."""
+    """Вернуть тело одного блока ``<header>…</header>`` брифа."""
     start = context.index(f"<{header}>")
     end = context.index(f"</{header}>")
     return context[start:end]
 
 
 def tiered_matches() -> list[RetrievedChunk]:
-    """Matches of every tier, ordered by descending similarity as a search returns them."""
+    """Совпадения всех уровней, упорядоченные по убыванию близости, как их отдаёт поиск."""
     return [
         RetrievedChunk(
             chunk=build_chunk(
@@ -116,7 +116,7 @@ def policy(
     graffiti: TierPolicy | None = None,
     voice: TierPolicy | None = None,
 ) -> RetrievalPolicy:
-    """Build a policy, defaulting to the shipped one for the tiers left out."""
+    """Собрать политику, беря готовую из поставки для пропущенных уровней."""
     defaults = RetrievalPolicy()
     return RetrievalPolicy(
         official=official or defaults.official,
@@ -211,7 +211,9 @@ async def test_facts_and_rumours_are_rendered_in_separate_blocks() -> None:
 
 
 async def test_graffiti_never_leaks_into_the_official_block() -> None:
-    """The whole point of the split: hearsay must not be presented as lore."""
+    """Проверить, что настенные надписи не просачиваются в официальный блок: весь смысл
+    разделения в том, что слухи нельзя подавать как лор.
+    """
     service, _, ai_client = build_service()
 
     await service.process_chat_message(1, QUESTION)
@@ -248,7 +250,9 @@ async def test_absent_tier_is_announced_instead_of_left_empty() -> None:
 
 
 async def test_a_wholly_empty_archive_produces_no_brief_at_all() -> None:
-    """With nothing retrieved there is no brief; the provider then says so itself."""
+    """Проверить, что полностью пустой архив не порождает брифа вовсе: при пустой
+    выдаче брифа нет, и провайдер сам об этом скажет.
+    """
     service, _, ai_client = build_service(
         policy_override=policy(
             official=TierPolicy(limit=0),
@@ -278,7 +282,9 @@ async def test_zero_budget_skips_the_tier_entirely() -> None:
 
 
 async def test_the_voice_tier_is_ranked_but_not_gated_by_the_evidence_floor() -> None:
-    """A character's own lines are a style reference, so they survive a strict floor."""
+    """Проверить, что уровень голоса ранжируется, но не отсекается порогом
+    доказательств: реплики персонажа — это образец стиля, и они проходят строгий порог.
+    """
     service, _, ai_client = build_service(
         policy_override=policy(
             official=TierPolicy(limit=4, min_similarity=0.99),

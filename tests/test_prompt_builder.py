@@ -1,4 +1,4 @@
-"""Tests for the archive brief: the wording that separates facts from rumours."""
+"""Тесты брифа архива: формулировки, отделяющие факты от слухов."""
 
 from __future__ import annotations
 

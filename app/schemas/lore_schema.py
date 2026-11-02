@@ -1,13 +1,13 @@
-"""Schemas describing the lore archive contract.
+"""Схемы, описывающие контракт архива лора.
 
-Three shapes travel through the pipeline:
+Через конвейер проходят три формы:
 
-* :class:`LoreChunkCreate` — a normalised corpus record, before it is embedded.
-  It is also the row format of the on-disk JSONL corpus snapshot.
-* :class:`EmbeddedLoreChunk` — the same record with its vector and content hash,
-  which is what the repository persists.
-* :class:`LoreSource` — the evidence handed back to an API client, annotated
-  with the cosine similarity that retrieved it.
+* :class:`LoreChunkCreate` — нормализованная запись корпуса, до индексации.
+  Это ещё и формат строки снимка корпуса на диске.
+* :class:`EmbeddedLoreChunk` — та же запись с её вектором и хешем содержимого,
+  именно её и сохраняет репозиторий.
+* :class:`LoreSource` — доказательства, возвращаемые клиенту, помеченные
+  косинусной близостью, по которой они найдены.
 """
 
 from __future__ import annotations
@@ -17,38 +17,41 @@ from pydantic import BaseModel, Field
 from app.taxonomy import LoreTopic, SourceType
 
 CONTENT_HASH_LENGTH = 64
-"""SHA-256 hex digest length, matching the ``content_hash`` column."""
+"""Длина шестнадцатеричного дайджеста SHA-256, совпадающая со столбцом ``content_hash``."""
 
 
 class LoreChunkCreate(BaseModel):
-    """A lore fragment waiting to be embedded and stored."""
+    """Фрагмент лора, ждущий индексации и сохранения."""
 
     content: str = Field(min_length=1)
     source_type: SourceType = Field(
-        description="Evidence tier: verified lore, wall graffiti or a character voice sample.",
+        description=(
+            "Уровень доказательств: подтверждённый лор, настенные надписи или "
+            "реплика персонажа."
+        ),
     )
-    topic: LoreTopic = Field(description="Wiki section the record was extracted from.")
+    topic: LoreTopic = Field(description="Раздел вики, из которого извлечена запись.")
     title: str = Field(
         min_length=1,
         max_length=256,
-        description="Human-readable origin, e.g. 'No Mercy › The Subway'.",
+        description="Источник в человекочитаемом виде, например «No Mercy › The Subway».",
     )
     character_name: str | None = Field(
         default=None,
-        description="Speaker the record belongs to; only set for voice samples.",
+        description="Кому принадлежит реплика; заполняется только для образцов голоса.",
     )
     source_url: str = Field(default="", max_length=512)
 
 
 class EmbeddedLoreChunk(LoreChunkCreate):
-    """A corpus record together with its embedding and deduplication hash."""
+    """Запись корпуса вместе с её эмбеддингом и хешем дедупликации."""
 
     content_hash: str = Field(min_length=CONTENT_HASH_LENGTH, max_length=CONTENT_HASH_LENGTH)
     embedding: list[float] = Field(min_length=1)
 
 
 class LoreSource(BaseModel):
-    """A retrieved chunk returned alongside a generated answer."""
+    """Найденный фрагмент, возвращаемый рядом со сгенерированным ответом."""
 
     id: int
     source_type: SourceType
@@ -60,7 +63,7 @@ class LoreSource(BaseModel):
 
 
 class IngestionReport(BaseModel):
-    """Outcome of one ingestion run, surfaced by the CLI and by tests."""
+    """Итог одного прогона индексации, показываемый CLI и тестами."""
 
     stored: int = 0
     skipped: int = 0
@@ -68,5 +71,5 @@ class IngestionReport(BaseModel):
 
     @property
     def total(self) -> int:
-        """Number of records offered to the run, stored or skipped."""
+        """Число записей, предложенных прогону: сохранённых или пропущенных."""
         return self.stored + self.skipped

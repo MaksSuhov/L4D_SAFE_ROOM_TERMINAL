@@ -1,4 +1,4 @@
-"""Tests for the pure overlap metrics: no model, no database, no network."""
+"""Тесты чистых метрик пересечения: ни модели, ни базы, ни сети."""
 
 from __future__ import annotations
 
@@ -27,7 +27,9 @@ class TestTextOverlap:
         assert overlap.f1 == 1.0
 
     def test_precision_and_recall_split_when_text_differs(self) -> None:
-        """Answer says two of the reference words and one word too many."""
+        """Проверить, что precision и recall расходятся: в ответе два слова из эталона и
+        одно лишнее.
+        """
         overlap = text_overlap("держи дистанцию", "держи дистанцию бегом")
 
         assert overlap.precision == pytest.approx(2 / 3)

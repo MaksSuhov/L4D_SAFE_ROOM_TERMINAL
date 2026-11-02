@@ -1,8 +1,8 @@
-"""Tests for the provider adapter: batching, ordering, translation fallback.
+"""Тесты адаптера провайдера: батчинг, порядок, запасной путь перевода.
 
-The adapter talks to :class:`~tests.provider_server.ProviderServer`, a local stub
-speaking the OpenAI wire format, so request bodies are exercised for real without
-a network or an API key.
+Адаптер общается с :class:`~tests.provider_server.ProviderServer`, локальной
+заглушкой, говорящей на сетевом формате OpenAI, поэтому тела запросов
+проверяются по-настоящему, без сети и ключа API.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from tests.provider_server import ProviderServer
 
 
 def build_client(server: ProviderServer, **overrides: Any) -> OpenAIClient:
-    """Point the adapter at the stub, overriding the tunables a test cares about."""
+    """Направить адаптер на заглушку, переопределив настройки, важные для теста."""
     settings = Settings(
         ai_api_key="sk-test",
         ai_base_url=server.base_url,
@@ -46,7 +46,9 @@ class TestEmbeddings:
             await client.aclose()
 
     async def test_restores_the_requested_order(self) -> None:
-        """The API may answer out of order and restarts its index per batch."""
+        """Проверить, что запрошенный порядок восстанавливается, хотя API может ответить
+        не по порядку и сбрасывает индекс на каждом батче.
+        """
         with ProviderServer() as server:
             client = build_client(server)
 
@@ -74,7 +76,7 @@ class TestEmbeddings:
             await client.aclose()
 
     async def test_a_short_batch_is_rejected(self) -> None:
-        """Fewer vectors than texts must fail loudly rather than shift the corpus."""
+        """Проверить, что нехватка векторов громко падает, а не сдвигает корпус."""
         with ProviderServer(drop_last_embedding=True) as server:
             client = build_client(server)
 
@@ -119,7 +121,7 @@ class TestTranslation:
             await client.aclose()
 
     async def test_a_malformed_batch_falls_back_to_single_texts(self) -> None:
-        """A corpus must never be lost because one batch came back wrong."""
+        """Проверить, что корпус не теряется, если один батч вернулся испорченным."""
         with ProviderServer(chat_replies=['["один"]', '["один"]', '["два"]']) as server:
             client = build_client(server)
 

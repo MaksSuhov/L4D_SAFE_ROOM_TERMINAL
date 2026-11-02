@@ -1,7 +1,7 @@
-"""Database layer: declarative base, async engine and session factory.
+"""Слой базы данных: декларативная база, асинхронный движок и фабрика сессий.
 
-The module owns *how* connections are created and never contains SQL for a
-specific entity — that responsibility belongs to the repository layer.
+Модуль отвечает за то, *как* создаются соединения, и никогда не содержит SQL
+для конкретной сущности — это ответственность слоя репозиториев.
 """
 
 from __future__ import annotations
@@ -22,15 +22,15 @@ from app.config import Settings
 
 
 class Base(DeclarativeBase):
-    """Declarative base shared by every ORM model of the project."""
+    """Декларативная база, общая для всех ORM-моделей проекта."""
 
 
 class Database:
-    """Owns the async engine and hands out short-lived sessions.
+    """Владеет асинхронным движком и выдаёт недолговечные сессии.
 
-    A single instance is created during the FastAPI lifespan and stored in
-    ``app.state``, so the connection pool is shared by the whole process
-    without relying on module-level globals.
+    Единственный экземпляр создаётся на протяжении жизненного цикла FastAPI и
+    хранится в ``app.state``, поэтому пул соединений общий для всего процесса и не
+    опирается на глобальные переменные модуля.
     """
 
     def __init__(self, settings: Settings) -> None:
@@ -51,12 +51,12 @@ class Database:
 
     @property
     def engine(self) -> AsyncEngine:
-        """Expose the engine for health checks and tests."""
+        """Отдать движок для проверки живости и тестов."""
         return self._engine
 
     @asynccontextmanager
     async def session(self) -> AsyncIterator[AsyncSession]:
-        """Provide a session that commits on success and rolls back on failure."""
+        """Отдать сессию, которая коммитит при успехе и откатывается при ошибке."""
         session = self._session_factory()
         try:
             yield session
@@ -68,7 +68,7 @@ class Database:
             await session.close()
 
     async def create_all(self) -> None:
-        """Enable pgvector and create every table declared on :class:`Base`."""
+        """Включить pgvector и создать все таблицы, объявленные на :class:`Base`."""
         # Imported here to guarantee that all mappers are registered in the
         # metadata before ``create_all`` runs, regardless of import order.
         import app.models  # noqa: F401  pylint: disable=unused-import
@@ -78,12 +78,12 @@ class Database:
             await connection.run_sync(Base.metadata.create_all)
 
     async def drop_all(self) -> None:
-        """Drop every table of the project; used by destructive tooling."""
+        """Удалить все таблицы проекта; используется деструктивным инструментом."""
         import app.models  # noqa: F401  pylint: disable=unused-import
 
         async with self._engine.begin() as connection:
             await connection.run_sync(Base.metadata.drop_all)
 
     async def dispose(self) -> None:
-        """Close the connection pool; called on application shutdown."""
+        """Закрыть пул соединений; вызывается при остановке приложения."""
         await self._engine.dispose()

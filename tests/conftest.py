@@ -1,7 +1,7 @@
-"""Test configuration.
+"""Конфигурация тестов.
 
-Environment variables are set before ``app`` is imported so that the settings
-cache and the OpenAI client construction see a deterministic configuration.
+Переменные окружения выставляются до импорта ``app``, чтобы кэш настроек и
+создание клиента OpenAI видели детерминированную конфигурацию.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from app.config import get_settings  # noqa: E402
 
 @pytest.fixture(scope="session", autouse=True)
 def settings_cache() -> Iterator[None]:
-    """Rebuild settings from the test environment for this session."""
+    """Пересобрать настройки из тестового окружения для этой сессии."""
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

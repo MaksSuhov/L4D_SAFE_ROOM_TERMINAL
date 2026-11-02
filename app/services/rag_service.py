@@ -18,27 +18,29 @@ from app.taxonomy import SourceType
 
 @dataclass(frozen=True, slots=True)
 class TierPolicy:
-    """How much one evidence tier may contribute to an answer, and how close."""
+    """Сколько один уровень доказательств может дать ответу и насколько близкими
+    должны быть совпадения.
+    """
 
     limit: int = 0
     min_similarity: float = 0.0
 
     @property
     def is_enabled(self) -> bool:
-        """Whether the tier is consulted at all."""
+        """Правда ли, что уровень вообще запрашивается."""
         return self.limit > 0
 
 
 @dataclass(frozen=True, slots=True)
 class RetrievalPolicy:
-    """The budget and the similarity floor of every tier.
+    """Бюджет и порог косинусной близости для каждого уровня.
 
-    The floors are per tier because the tiers serve different purposes. Verified
-    lore and wall graffiti are *evidence*: a weak match is noise that would make
-    the answer worse, so a match has to earn its place. The character's own lines
-    are a *style reference*: they are already narrowed to one character, and the
-    two most relevant of their lines are useful even when the question has
-    nothing to do with what those lines were recorded for.
+    Пороги задаются отдельно по уровням, потому что уровни служат разным целям.
+    Проверенный лор и настенные надписи — это *доказательства*: слабое совпадение
+    это шум, который испортил бы ответ, поэтому совпадение должно заслужить своё
+    место. Собственные реплики персонажа — *образец стиля*: они уже сужены до
+    одного персонажа, и две самые релевантные из них полезны даже тогда, когда
+    вопрос совсем не о том, для чего эти реплики записывались.
     """
 
     official: TierPolicy = TierPolicy(limit=4, min_similarity=0.25)
@@ -46,7 +48,7 @@ class RetrievalPolicy:
     voice: TierPolicy = TierPolicy(limit=2, min_similarity=0.0)
 
     def for_tier(self, source_type: SourceType) -> TierPolicy:
-        """Return the policy of ``source_type``."""
+        """Вернуть политику для ``source_type``."""
         return {
             SourceType.OFFICIAL: self.official,
             SourceType.GRAFFITI: self.graffiti,
@@ -55,15 +57,16 @@ class RetrievalPolicy:
 
 
 class RAGService:
-    """Two-level retrieval-augmented generation for one chat message.
+    """Двухуровневая генерация с дополнением из поиска для одного сообщения чата.
 
-    Flow: embed the question -> retrieve the three evidence tiers separately
-    (verified lore, wall graffiti, the character's own lines) -> load the
-    persona -> assemble the archive brief -> generate the answer.
+    Поток: получить эмбеддинг вопроса -> найти три уровня доказательств по
+    отдельности (проверенный лор, настенные надписи, собственные реплики
+    персонажа) -> загрузить образ -> собрать архивную сводку -> сгенерировать
+    ответ.
 
-    The tiers are retrieved in independent queries with their own budgets. That
-    is the point of the pipeline: a wall of rumours cannot crowd the verified
-    lore out of the context, because the two never compete for the same slots.
+    Уровни находятся отдельными запросами со своими бюджетами. В этом суть
+    конвейера: стена слухов не может вытеснить проверенный лор из контекста,
+    потому что они никогда не конкурируют за одни и те же места.
     """
 
     def __init__(
@@ -82,7 +85,7 @@ class RAGService:
         self._policy = policy or RetrievalPolicy()
 
     async def process_chat_message(self, character_id: int, user_message: str) -> ChatResponse:
-        """Answer ``user_message`` as the character identified by ``character_id``."""
+        """Ответить на ``user_message`` от лица персонажа с ``character_id``."""
         prepared = await self.build_chat_context(character_id, user_message)
 
         answer = await self._ai_client.generate_response(
@@ -101,11 +104,11 @@ class RAGService:
         )
 
     async def build_chat_context(self, character_id: int, user_message: str) -> PreparedChat:
-        """Run retrieval for one message and return everything generation needs.
+        """Выполнить поиск для одного сообщения и вернуть всё, что нужно генерации.
 
-        The retrieval half of the pipeline, exposed on its own: the HTTP route
-        uses it indirectly, while the evaluation harness uses it directly so it
-        can stream the answer and time the first token.
+        Половина конвейера, отвечающая за поиск, выставлена отдельно: HTTP-маршрут
+        пользуется ею косвенно, а стенд оценки — напрямую, чтобы стримить ответ и
+        замерять время до первого токена.
         """
         character = await self._characters.get_by_id(character_id)
         if character is None:
@@ -129,7 +132,7 @@ class RAGService:
         query_embedding: Sequence[float],
         character_name: str,
     ) -> ArchiveEvidence:
-        """Look every tier up separately, applying its own budget and floor."""
+        """Найти каждый уровень отдельно, применяя его собственный бюджет и порог."""
         return ArchiveEvidence(
             official=await self._retrieve(query_embedding, SourceType.OFFICIAL),
             graffiti=await self._retrieve(query_embedding, SourceType.GRAFFITI),
@@ -147,7 +150,7 @@ class RAGService:
         *,
         character_name: str | None = None,
     ) -> list[RetrievedChunk]:
-        """Search one tier and drop the matches that are too far to be evidence."""
+        """Найти один уровень и отбросить совпадения, слишком далёкие для доказательств."""
         policy = self._policy.for_tier(source_type)
         if not policy.is_enabled:
             return []
@@ -162,7 +165,7 @@ class RAGService:
 
     @staticmethod
     def _build_sources(matches: Sequence[RetrievedChunk]) -> list[LoreSource]:
-        """Expose the evidence used for the answer to the API client."""
+        """Показать клиенту API доказательства, использованные в ответе."""
         return [
             LoreSource(
                 id=match.chunk.id,

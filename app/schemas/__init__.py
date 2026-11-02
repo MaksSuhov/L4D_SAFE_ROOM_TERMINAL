@@ -1,9 +1,9 @@
-"""Pydantic schemas: the contract between the API layer and its clients.
+"""Pydantic-схемы: контракт между слоем API и его клиентами.
 
-ORM models never leave the service layer, they are converted into these
-schemas, which keeps the HTTP contract stable even if the persistence model
-changes. The package facade re-exports every schema so callers keep a single
-import path while the definitions are grouped by aggregate.
+ORM-модели никогда не покидают слой сервисов, они преобразуются в эти схемы,
+что сохраняет контракт HTTP стабильным, даже если модель хранения изменится.
+Фасад пакета реэкспортирует каждую схему, чтобы вызывающий код сохранял единый
+путь импорта, пока определения сгруппированы по агрегату.
 """
 
 from app.schemas.character_schema import (

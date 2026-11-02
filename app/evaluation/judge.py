@@ -1,10 +1,3 @@
-"""LLM-судья: модель оценивает ответ и возвращает разобранные баллы.
-
-Класс зависит только от порта :class:`~app.evaluation.interfaces.CompletionProtocol`,
-то есть от «умения получить текстовый ответ». Ему не нужны ни эмбеддинги, ни
-поиск, ни персонажи, — поэтому в тестах он проверяется обычной заглушкой.
-"""
-
 from __future__ import annotations
 
 import json
@@ -34,7 +27,7 @@ JSON_OBJECT_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
 
 
 class LLMJudge:
-    """Оценивает один ответ через обычный текстовый запрос к модели."""
+    """Оценивает один ответ через обычный текстовый запрос к модели"""
 
     def __init__(self, model: CompletionProtocol) -> None:
         self._model = model

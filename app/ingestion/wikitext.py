@@ -1,13 +1,14 @@
-"""Turning MediaWiki markup into readable plain text.
+"""Превращение разметки MediaWiki в читаемый простой текст.
 
-The Fandom pages mix prose with heavy furniture: infobox templates, stat tables,
-image galleries, reference footnotes and inline styling. A vector store is only
-as good as the text fed to it, so this module strips the furniture while keeping
-the facts — notably the stat tables, whose numbers are some of the most useful
-data on the infected pages.
+Страницы Fandom смешивают прозу с тяжёлой служебной разметкой: шаблонами
+инфобоксов, таблицами характеристик, галереями изображений, сносками и
+встроенным стилем. Векторное хранилище ровно настолько хорошо, насколько хорош
+скормленный ему текст, поэтому модуль срезает служебную разметку, сохраняя
+факты — прежде всего таблицы характеристик, чьи числа — одни из самых полезных
+данных на страницах заражённых.
 
-Everything here is pure text processing: no network, no database, so the
-behaviour is pinned down by fast unit tests.
+Здесь всё — чистая обработка текста: ни сети, ни базы, поэтому поведение
+закреплено быстрыми модульными тестами.
 """
 
 from __future__ import annotations
@@ -17,10 +18,10 @@ import re
 from dataclasses import dataclass
 
 HEADING_PATTERN = re.compile(r"^(?P<marks>={1,6})\s*(?P<title>.+?)\s*(?P=marks)\s*$")
-"""A wiki heading such as ``=== The Subway ===``."""
+"""Вики-заголовок, например ``=== The Subway ===``."""
 
 LIST_MARKER_PATTERN = re.compile(r"^(?P<marks>[*#:;]+)\s*(?P<body>.*)$")
-"""A list item, with the marker chain kept to recover its nesting depth."""
+"""Элемент списка; цепочка маркеров сохраняется, чтобы восстановить глубину вложенности."""
 
 COMMENT_PATTERN = re.compile(r"<!--.*?-->", re.DOTALL)
 GALLERY_PATTERN = re.compile(r"<gallery\b[^>]*>.*?</gallery>", re.DOTALL)
@@ -38,29 +39,30 @@ ATTRIBUTE_PATTERN = re.compile(
 BLANK_LINE_RUN = re.compile(r"\n{3,}")
 INLINE_SPACE_RUN = re.compile(r"[ \t]{2,}")
 EMPTY_PARENTHESES_PATTERN = re.compile(r"[(\[]\s*[)\]]")
-"""Brackets left empty by a dropped template, e.g. ``Зелёный грипп ()``.
+"""Скобки, оставшиеся пустыми после удалённого шаблона, напр. ``Зелёный грипп ()``.
 
-A template such as ``{{lang-en|Green Flu}}`` is furniture, but the parentheses
-around it belong to the sentence, so removing the template leaves a hollow pair
-that reads like a fact that went missing.
+Шаблон вроде ``{{lang-en|Green Flu}}`` — служебная разметка, но скобки вокруг
+него принадлежат предложению, поэтому удаление шаблона оставляет пустую пару,
+которая читается как пропавший факт.
 """
 
 STRAY_MARKUP_PATTERN = re.compile(r"\[\[|\]\]|\{\{|\}\}")
-"""Doubled brackets that survived link and template resolution.
+"""Сдвоенные скобки, пережившие разрешение ссылок и шаблонов.
 
-The wiki is hand-written and occasionally typos a link — ``[[штурмовая
-винтовка]]M16]]`` — which leaves a loose ``]]`` glued to the next word. Once
-links and templates are resolved, a doubled bracket can only be debris.
+Вики написана руками и иногда опечатывает ссылку — ``[[штурмовая
+винтовка]]M16]]`` — что оставляет болтающуюся ``]]``, приклеенную к
+следующему слову. После разрешения ссылок и шаблонов сдвоенная скобка может
+быть только мусором.
 """
 
 INTERWIKI_PREFIX_PATTERN = re.compile(r"^[a-z]{2,3}:")
-"""A language or interwiki link target such as ``en:Carriers`` or ``es:La Batalla Final``.
+"""Языковая или интервики-цель ссылки, например ``en:Carriers`` или ``es:La Batalla Final``.
 
-Every Fandom article ends with a block of these, and they carry no lore: kept,
-each page contributes a record that is nothing but link names, which then
-competes for an evidence slot it can never fill. The wiki's own article titles
-are Cyrillic or namespace-prefixed, so a two- or three-letter Latin prefix is
-always a link, never a subject.
+Каждая статья Fandom заканчивается блоком таких ссылок, и лора в них нет: если
+оставить, каждая страница даёт запись, состоящую только из имён ссылок, а та
+претендует на место в доказательствах, которое никогда не заполнит. Собственные
+заголовки статей вики кириллические или с префиксом пространства имён, поэтому
+латинский префикс из двух-трёх букв — всегда ссылка, никогда не тема.
 """
 
 DROPPED_MEDIA_PREFIXES = (
@@ -77,25 +79,25 @@ DROPPED_MEDIA_PREFIXES = (
 )
 
 INFOBOX_PREFIX = "infobox"
-"""Templates whose name starts with this are data, not layout, and are kept.
+"""Шаблоны, чьё имя начинается с этого, — данные, а не разметка, и сохраняются.
 
-The infection pages store the numbers that make them worth reading — health per
-difficulty, damage, speed — in ``{{Infobox infected|Health = 4000 …}}``. Dropping
-every template would drop exactly the facts the archive is supposed to answer
-questions with, so infoboxes are rendered as ``Key — Value`` lines while layout
-templates such as ``{{pix}}`` are still removed.
+Страницы заражения хранят числа, ради которых их и стоит читать — здоровье по
+сложности, урон, скорость — в ``{{Infobox infected|Health = 4000 …}}``. Удаление
+каждого шаблона удалило бы ровно те факты, которыми архив и должен отвечать на
+вопросы, поэтому инфобоксы рендерятся строками ``Key — Value``, а шаблоны
+разметки вроде ``{{pix}}`` по-прежнему убираются.
 """
 
 INFOBOX_PAIR_SEPARATOR = " — "
 INFOBOX_IGNORED_KEYS = frozenset({"image"})
-"""Keys whose value is a picture, not information."""
+"""Ключи, значением которых служит картинка, а не информация."""
 
 EMPTY_PAIR_PATTERN = re.compile(r"^[^—\n]{1,80}—$")
-"""A parameter whose value was markup only, e.g. ``Ability icon —``.
+"""Параметр, значением которого была одна разметка, напр. ``Ability icon —``.
 
-Such a row survives rendering but says nothing, and a bag of empty keys is what
-makes an embedding diffuse — precisely the opposite of what a statistics record
-is for.
+Такая строка переживает рендеринг, но ничего не говорит, а мешок пустых ключей
+делает эмбеддинг размытым — ровно наоборот тому, для чего нужна запись
+статистики.
 """
 
 CELL_SEPARATOR_PATTERN = re.compile(r"\s*(?:\|\||!!)\s*")
@@ -103,33 +105,33 @@ CELL_SEPARATOR_PATTERN = re.compile(r"\s*(?:\|\||!!)\s*")
 
 @dataclass(frozen=True, slots=True)
 class Section:
-    """One heading of a page together with the text that follows it."""
+    """Один заголовок страницы вместе с текстом, который за ним следует."""
 
     level: int
     title: str
     body: str
     path: tuple[str, ...]
-    """Titles of the enclosing headings, outermost first, ending with ``title``."""
+    """Заголовки охватывающих разделов, от внешнего к внутреннему, кончая ``title``."""
 
     def location(self, page: str) -> str:
-        """Human-readable provenance such as ``Green Flu › Origin``."""
+        """Читаемое происхождение, например ``Green Flu › Origin``."""
         return " › ".join((page, *self.path))
 
 
 @dataclass(frozen=True, slots=True)
 class ListItem:
-    """One list item with the depth of its marker chain."""
+    """Один элемент списка с глубиной его цепочки маркеров."""
 
     depth: int
     text: str
 
 
 def _find_balanced_end(text: str, start: int, open_token: str, close_token: str) -> int:
-    """Return the index just past the token that closes the one at ``start``.
+    """Вернуть индекс сразу за токеном, закрывающим токен в ``start``.
 
-    Nested occurrences of ``open_token`` are counted, which is what makes the
-    scanner survive constructs such as a file link whose caption contains
-    another link.
+    Вложенные вхождения ``open_token`` учитываются — именно это позволяет
+    сканированию переживать конструкции вроде файловой ссылки, чья подпись
+    содержит другую ссылку.
     """
     depth = 0
     index = start
@@ -150,14 +152,14 @@ def _find_balanced_end(text: str, start: int, open_token: str, close_token: str)
 
 
 def _split_template_parameters(text: str) -> list[str]:
-    """Split template parameters on the ``|`` that separates them.
+    """Разбить параметры шаблона по ``|``, который их разделяет.
 
-    A naive split is wrong, and expensively so: a value such as
-    ``[[File:x.png|50px]]`` contains a pipe of its own, so splitting on every pipe
-    tears the link apart. The leftover ``[[`` is unbalanced, and the link
-    resolver then swallows the rest of the value — which is how the Tank's health
-    figures disappeared the first time this was written. Only top-level pipes
-    separate parameters; those inside links, nested templates or tags do not.
+    Наивное разбиение неверно, и дорого: значение вроде ``[[File:x.png|50px]]``
+    содержит свою вертикальную черту, поэтому разбиение по каждой черте разрывает
+    ссылку. Оставшийся ``[[`` не сбалансирован, и разрешение ссылок затем
+    проглатывает остаток значения — так в первый раз и исчезли цифры здоровья
+    Танка. Разделяют параметры только черты верхнего уровня; те, что внутри
+    ссылок, вложенных шаблонов или тегов, — нет.
     """
     parts: list[str] = []
     current: list[str] = []
@@ -197,9 +199,9 @@ def _split_template_parameters(text: str) -> list[str]:
 
 
 def _render_infobox(inner: str) -> str:
-    """Render the parameters of an infobox template, or return ``""`` to drop it.
+    """Отрендерить параметры шаблона инфобокса или вернуть ``""``, чтобы его отбросить.
 
-    ``inner`` is the text between the braces of one balanced ``{{…}}`` span.
+    ``inner`` — текст между скобками одного сбалансированного пролёта ``{{…}}``.
     """
     segments = _split_template_parameters(inner)
     if not segments[0].strip().lower().startswith(INFOBOX_PREFIX):
@@ -221,7 +223,7 @@ def _render_infobox(inner: str) -> str:
 
 
 def _resolve_templates(text: str) -> str:
-    """Keep the data of infoboxes and drop every other template."""
+    """Сохранить данные инфобоксов и отбросить все остальные шаблоны."""
     result: list[str] = []
     index = 0
     while index < len(text):
@@ -238,7 +240,7 @@ def _resolve_templates(text: str) -> str:
 
 
 def _drop_balanced_spans(text: str, open_token: str, close_token: str) -> str:
-    """Remove every balanced ``open_token``…``close_token`` span from ``text``."""
+    """Удалить из ``text`` каждый сбалансированный пролёт ``open_token``…``close_token``."""
     result: list[str] = []
     index = 0
     while index < len(text):
@@ -252,7 +254,7 @@ def _drop_balanced_spans(text: str, open_token: str, close_token: str) -> str:
 
 
 def _resolve_links(text: str) -> str:
-    """Replace wiki links by their label, dropping links to media and categories."""
+    """Заменить вики-ссылки их подписью, отбрасывая ссылки на медиа и категории."""
     result: list[str] = []
     index = 0
     while index < len(text):
@@ -269,12 +271,12 @@ def _resolve_links(text: str) -> str:
 
 
 def _link_label(inner: str) -> str:
-    """Return the visible text of one link target, or an empty string to drop it.
+    """Вернуть видимый текст одной цели ссылки или пустую строку, чтобы её отбросить.
 
-    The parameters are split on *top-level* pipes only: a file link whose
-    caption contains another link — ``[[Файл:x.png|thumb|Склад [[Боеприпасы|…]]]]``
-    — would otherwise be torn apart by a naive split, leaking the tail of the
-    caption into the corpus with a stray ``]]`` attached.
+    Параметры делятся только по *чертам верхнего уровня*: файловая ссылка, чья
+    подпись содержит другую ссылку — ``[[Файл:x.png|thumb|Склад [[Боеприпасы|…]]]]``
+    — иначе была бы разорвана наивным разбиением, вынося хвост подписи в корпус с
+    приклеенной лишней ``]]``.
     """
     parts = _split_template_parameters(inner)
     target = parts[0].strip()
@@ -288,11 +290,11 @@ def _link_label(inner: str) -> str:
 
 
 def _flatten_tables(text: str) -> str:
-    """Turn wiki table markup into plain lines, preserving the cell text.
+    """Превратить разметку вики-таблиц в простые строки, сохраняя текст ячеек.
 
-    The stat tables of the infected pages hold the health, damage and speed
-    numbers, so a table is flattened rather than deleted: each row becomes one
-    line and the cells of a row are joined with a dash.
+    Таблицы характеристик страниц заражённых хранят числа здоровья, урона и
+    скорости, поэтому таблица разворачивается, а не удаляется: каждая строка
+    становится одной строкой текста, а ячейки строки соединяются тире.
     """
     lines: list[str] = []
     for line in text.split("\n"):
@@ -316,10 +318,10 @@ def _flatten_tables(text: str) -> str:
 
 
 class WikitextCleaner:
-    """Converts MediaWiki markup into plain text with the structure preserved."""
+    """Превращает разметку MediaWiki в простой текст с сохранением структуры."""
 
     def clean(self, wikitext: str) -> str:
-        """Return the readable text of ``wikitext``, line breaks preserved."""
+        """Вернуть читаемый текст ``wikitext`` с сохранением переносов строк."""
         # Comments and footnotes are inline, so they vanish without leaving a
         # gap behind: "infection.<ref>a</ref>" must not become "infection. ."
         text = COMMENT_PATTERN.sub("", wikitext)
@@ -343,11 +345,11 @@ class WikitextCleaner:
         return self._tidy(text)
 
     def lead(self, wikitext: str) -> str:
-        """Return the text that precedes the first heading.
+        """Вернуть текст, предшествующий первому заголовку.
 
-        The lead is the page's own summary and carries the most cited facts, so
-        it is treated as a section of its own rather than dropped by
-        :meth:`sections`, which starts at the first heading.
+        Введение — это собственная сводка страницы, несущая самые цитируемые факты,
+        поэтому оно считается отдельным разделом, а не отбрасывается :meth:`sections`,
+        который начинается с первого заголовка.
         """
         collected: list[str] = []
         for line in wikitext.split("\n"):
@@ -357,7 +359,7 @@ class WikitextCleaner:
         return "\n".join(collected).strip()
 
     def sections(self, wikitext: str, *, min_level: int = 2) -> list[Section]:
-        """Split a page into its headings, keeping the nesting path of each one."""
+        """Разбить страницу на её заголовки, сохраняя путь вложенности каждого."""
         sections: list[Section] = []
         stack: list[tuple[int, str]] = []
         current_title: str | None = None
@@ -398,11 +400,10 @@ class WikitextCleaner:
         return sections
 
     def list_items(self, text: str) -> list[ListItem]:
-        """Extract list items with their nesting depth, skipping blank markers.
+        """Извлечь элементы списка с их глубиной вложенности, пропуская пустые маркеры.
 
-        A deeper marker is a reply to the item above it — the safe-room walls are
-        full of such back-and-forth — so the depth is reported instead of being
-        flattened away by the caller.
+        Более глубокий маркер — это ответ на элемент выше, а стены убежищ полны
+        таких перекличек, поэтому глубина сообщается, а не выравнивается вызывающим кодом.
         """
         items: list[ListItem] = []
         for line in self.clean(text).split("\n"):
@@ -416,12 +417,12 @@ class WikitextCleaner:
         return items
 
     def paragraphs(self, text: str) -> list[str]:
-        """Split cleaned text into non-empty paragraphs."""
+        """Разбить очищенный текст на непустые абзацы."""
         return [block.strip() for block in re.split(r"\n\s*\n", self.clean(text)) if block.strip()]
 
     @staticmethod
     def _tidy(text: str) -> str:
-        """Normalise spacing without losing the paragraph structure."""
+        """Нормализовать пробелы, не теряя структуру абзацев."""
         lines = [
             INLINE_SPACE_RUN.sub(" ", line).strip()
             for line in text.split("\n")

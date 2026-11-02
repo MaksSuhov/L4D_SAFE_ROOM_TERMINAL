@@ -1,8 +1,8 @@
-"""A local HTTP stub speaking the OpenAI wire format.
+"""Локальная HTTP-заглушка, говорящая на сетевом формате OpenAI.
 
-The adapter is exercised over a real socket rather than a mocked transport. That
-keeps the test honest — request bodies, batching and error handling all travel
-the same path as in production — and it needs neither a network nor an API key.
+Адаптер проверяется через настоящий сокет, а не через подменённый транспорт. Это
+держит тест честным — тела запросов, батчинг и обработка ошибок идут тем же
+путём, что и в продакшене, — и при этом не нужны ни сеть, ни ключ API.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any
 
 
 class _Handler(BaseHTTPRequestHandler):
-    """Answers embeddings and chat completions, recording every request."""
+    """Отвечает на эмбеддинги и чат-дополнения, записывая каждый запрос."""
 
     requests: list[dict[str, Any]] = []
     embedding_dimensions: int = 3
@@ -61,7 +61,7 @@ class _Handler(BaseHTTPRequestHandler):
         return {"object": "list", "model": "stub-embeddings", "data": data}
 
     def _vector(self, text: str, index: int) -> list[float]:
-        """Encode the first character of the text so order can be verified."""
+        """Закодировать первый символ текста, чтобы можно было проверить порядок."""
         marker = float(ord(text[0])) if text else 0.0
         vector = [marker, float(index), 0.0]
         width = type(self).embedding_dimensions
@@ -80,11 +80,11 @@ class _Handler(BaseHTTPRequestHandler):
         }
 
     def log_message(self, format: str, *args: Any) -> None:
-        """Silence the default stderr logging."""
+        """Заглушить стандартное логирование в stderr."""
 
 
 class ProviderServer:
-    """Context manager running the stub on a free localhost port."""
+    """Контекстный менеджер, поднимающий заглушку на свободном порту localhost."""
 
     def __init__(
         self,

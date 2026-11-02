@@ -1,7 +1,7 @@
-"""ORM model of a survivor persona.
+"""ORM-модель образа выжившего.
 
-Annotations use the modern ``Mapped[...]`` / ``mapped_column(...)`` style, so the
-Python types describe the database schema directly.
+Аннотации используют современный стиль ``Mapped[...]`` / ``mapped_column(...)``,
+так что типы Python напрямую описывают схему базы данных.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from app.database import Base
 
 
 class Character(Base):
-    """A survivor persona the terminal is able to impersonate."""
+    """Образ выжившего, в которого терминал умеет перевоплощаться."""
 
     __tablename__ = "characters"
 

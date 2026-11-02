@@ -1,4 +1,4 @@
-"""Schemas describing the operational endpoints of the service."""
+"""Схемы, описывающие эксплуатационные эндпоинты сервиса."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 
 class HealthResponse(BaseModel):
-    """Result of the readiness probe."""
+    """Результат пробы готовности."""
 
     status: str
     version: str

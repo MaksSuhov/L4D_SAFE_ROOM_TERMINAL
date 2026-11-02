@@ -1,4 +1,4 @@
-"""ORM model of a retrievable lore fragment with its pgvector embedding."""
+"""ORM-модель извлекаемого фрагмента лора вместе с его эмбеддингом pgvector."""
 
 from __future__ import annotations
 
@@ -14,22 +14,22 @@ from app.database import Base
 from app.taxonomy import SourceType
 
 EMBEDDING_DIMENSIONS: Final[int] = get_settings().embedding_dimensions
-"""Vector width of the embedding column; must match the configured embedding model."""
+"""Ширина вектора столбца эмбеддингов; должна совпадать с настроенной моделью."""
 
 SOURCE_TYPE_VALUES: Final[tuple[str, ...]] = tuple(member.value for member in SourceType)
-"""Allowed values of ``source_type``, derived from the taxonomy so the database
-constraint can never drift away from the enum."""
+"""Допустимые значения ``source_type``, выведенные из таксономии, чтобы ограничение
+в базе данных никогда не разошлось с перечислением."""
 
 _CONTENT_HASH_LENGTH: Final[int] = 64
-"""Length of a SHA-256 hex digest, kept in sync with the hashing helper."""
+"""Длина шестнадцатеричного дайджеста SHA-256, синхронизированная с помощником."""
 
 
 class LoreChunk(Base):
-    """A single retrievable fragment of Left 4 Dead lore with its embedding.
+    """Один извлекаемый фрагмент лора Left 4 Dead вместе с его эмбеддингом.
 
-    Besides the text and the vector, every row carries its provenance — where it
-    came from and how much it can be trusted — because the retrieval pipeline
-    answers differently depending on :attr:`source_type`.
+    Помимо текста и вектора каждая строка несёт своё происхождение — откуда она
+    взялась и насколько ей можно доверять, — потому что конвейер выборки отвечает
+    по-разному в зависимости от :attr:`source_type`.
     """
 
     __tablename__ = "lore_chunks"
@@ -80,7 +80,7 @@ class LoreChunk(Base):
         )
 
     def as_dict(self) -> dict[str, Any]:
-        """Return a serialisable view without the embedding vector."""
+        """Вернуть сериализуемое представление без вектора эмбеддинга."""
         return {
             "id": self.id,
             "content": self.content,

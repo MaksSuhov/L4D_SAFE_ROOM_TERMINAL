@@ -1,15 +1,15 @@
-"""Declarative registry of the wiki pages that make up the corpus.
+"""Декларативный реестр вики-страниц, из которых состоит корпус.
 
-Every page the pipeline reads is declared here once, together with the topic it
-belongs to and the parser that knows its layout. Adding a page to the corpus is
-therefore a one-line change, and the set of sources is reviewable at a glance
-instead of being scattered across the code.
+Каждая страница, которую читает конвейер, объявляется здесь один раз вместе с
+темой, к которой относится, и парсером, знающим её структуру. Поэтому добавить
+страницу в корпус — изменение в одну строку, а набор источников можно окинуть
+взглядом, а не искать по всему коду.
 
-The corpus is read from the **Russian** Left 4 Dead Wiki (``/ru`` branch of the
-Fandom wiki), because the terminal answers in Russian: keeping the archive and
-the questions in one language makes retrieval monolingual, which is worth far
-more than the extra detail the English articles carry. The registry therefore
-holds Russian titles, and the traps noted below are Russian-wiki specific.
+Корпус читается из **русской** Left 4 Dead Wiki (ветка ``/ru`` вики Fandom),
+потому что терминал отвечает на русском: держать архив и вопросы на одном языке
+делает поиск одноязычным, что стоит куда больше, чем лишние детали английских
+статей. Поэтому реестр хранит русские заголовки, а ловушки, отмеченные ниже,
+специфичны для русской вики.
 """
 
 from __future__ import annotations
@@ -22,27 +22,26 @@ from app.taxonomy import LoreTopic, SourceType
 
 
 class ParserKind(StrEnum):
-    """Layout families the wiki uses, each handled by its own parser."""
+    """Семейства разметки, используемые вики; каждое обрабатывает свой парсер."""
 
     GRAFFITI = "graffiti"
-    """Campaign › chapter › list of wall inscriptions."""
+    """Кампания › глава › список настенных надписей."""
 
     ARTICLE = "article"
-    """Encyclopaedia prose with stat tables, split by heading."""
+    """Энциклопедическая проза с таблицами характеристик, разбитая по заголовкам."""
 
     QUOTES = "quotes"
-    """Dialogue lists grouped by situation."""
+    """Списки диалогов, сгруппированные по ситуациям."""
 
     SUBTITLES = "subtitles"
-    """A Russian/English subtitle table, one character per page."""
+    """Русско-английская таблица субтитров, один персонаж на страницу."""
 
     @property
     def source_type(self) -> SourceType:
-        """Evidence tier produced by this layout.
+        """Уровень свидетельств, порождаемый этой разметкой.
 
-        Deriving the tier from the layout keeps the two in step: a quotes or
-        subtitle page can only ever produce voice samples, and an article page
-        can only ever produce official lore.
+        Вывод уровня из разметки держит их в согласии: страница цитат или субтитров
+        может дать только голосовые образцы, а страница статьи — только официальный лор.
         """
         return {
             ParserKind.GRAFFITI: SourceType.GRAFFITI,
@@ -54,13 +53,13 @@ class ParserKind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class WikiSource:
-    """One wiki page of the corpus."""
+    """Одна вики-страница корпуса."""
 
     page: str
     topic: LoreTopic
     parser: ParserKind
     character_name: str | None = None
-    """Character the page belongs to (their quotes) or is about (their biography)."""
+    """Персонаж, которому принадлежит страница (его цитаты) или о котором она (его биография)."""
 
 
 BILL = "Билл"
@@ -82,10 +81,10 @@ CHARACTER_PAGES: tuple[tuple[str, str], ...] = (
     ("Рошель", ROCHELLE),
     ("Эллис", ELLIS),
 )
-"""Wiki article title and the display name stored in the database.
+"""Название статьи вики и отображаемое имя, хранимое в базе.
 
-``Зой``/``Френсис`` also exist on the Russian wiki as orphaned duplicates; only
-the canonical spelling of each survivor is declared here.
+``Зой``/``Френсис`` существуют на русской вики и как осиротевшие дубликаты;
+здесь объявлено только каноничное написание каждого выжившего.
 """
 
 QUOTE_PAGES: tuple[tuple[str, str], ...] = (
@@ -98,12 +97,12 @@ QUOTE_PAGES: tuple[tuple[str, str], ...] = (
     ("Субтитры (Left 4 Dead 2)/Рошель", ROCHELLE),
     ("Субтитры (Left 4 Dead 2)/Эллис", ELLIS),
 )
-"""Where the recorded lines of each survivor live.
+"""Где лежат записанные реплики каждого выжившего.
 
-The Russian wiki stores the dialogue as subtitle tables split by game rather
-than as curated quote pages, so each survivor is declared on the page of the
-game they debut in. ``Субтитры (The Passing)/…`` holds a second, shorter dump
-per survivor if the voice tier ever needs widening.
+Русская вики хранит диалоги как таблицы субтитров, разбитые по играм, а не как
+отобранные страницы цитат, поэтому каждый выживший объявлен на странице игры, в
+которой он впервые появляется. ``Субтитры (The Passing)/…`` хранит второй, более
+короткий дамп на выжившего, если уровень голосов когда-нибудь придётся расширить.
 """
 
 INFECTION_PAGES: tuple[str, ...] = (
@@ -128,15 +127,16 @@ INFECTED_PAGES: tuple[str, ...] = (
     "Ведьма",
     "Крикун",
 )
-"""The infected pages that carry the facts about the mutations.
+"""Страницы заражённых, несущие факты о мутациях.
 
-The Russian wiki keeps one article per special infected instead of the English
-wiki's shared page, which is a straight upgrade for retrieval. Two traps, both
-found by reading the wiki rather than the code: ``Необычные Заражённые`` is
-capitalised as a redirect of the lowercase title, and the uncommon infected
-(``Заражённый клоун``, ``Строитель``, ``Грязевик``…) are section redirects of
-``Необычные заражённые`` — declaring them would re-fetch the whole parent page.
-``Крикун`` is the cut Screamer, kept because it is real cut-content lore.
+Русская вики держит по одной статье на особого заражённого вместо общей
+страницы английской вики — это чистое улучшение для поиска. Две ловушки, обе
+найдены чтением вики, а не кода: ``Необычные Заражённые`` капитализированы как
+перенаправление на строчный заголовок, а необычные заражённые
+(``Заражённый клоун``, ``Строитель``, ``Грязевик``…) — это перенаправления на
+разделы ``Необычные заражённые``; объявить их значило бы заново забрать всю
+родительскую страницу. ``Крикун`` — вырезанный персонаж, оставлен, потому что
+это настоящий лор вырезанного контента.
 """
 
 CAMPAIGN_PAGES: tuple[str, ...] = (
@@ -196,15 +196,15 @@ WEAPON_PAGES: tuple[str, ...] = (
     "Крикетная бита",
     "Клюшка для гольфа",
 )
-"""The arsenal, missing from the English corpus entirely.
+"""Арсенал, полностью отсутствующий в английском корпусе.
 
-Only canonical titles are declared: the wiki has a redirect for almost every
-weapon (``АК-47`` → ``Автомат Калашникова``, ``Монтировка`` → ``Фомка``,
-``Сковорода`` → ``Сковородка``), and declaring a redirect both repeats the fetch
-and files the text under a name the wiki does not use. ``Оружие``,
-``Боеприпасы`` and ``Комплекты улучшений`` are the umbrella pages; the redirects
-that point at them (``Основное оружие``, ``Фонарик``, ``Зажигательные
-боеприпасы``…) are deliberately absent for the same reason.
+Объявлены только каноничные заголовки: почти у каждого оружия на вики есть
+перенаправление (``АК-47`` → ``Автомат Калашникова``, ``Монтировка`` → ``Фомка``,
+``Сковорода`` → ``Сковородка``), а объявление перенаправления и повторяет
+загрузку, и кладёт текст под именем, которое вики не использует. ``Оружие``,
+``Боеприпасы`` и ``Комплекты улучшений`` — зонтичные страницы; перенаправления
+на них (``Основное оружие``, ``Фонарик``, ``Зажигательные боеприпасы``…)
+намеренно отсутствуют по той же причине.
 """
 
 ITEM_PAGES: tuple[str, ...] = (
@@ -240,11 +240,11 @@ LOCATION_PAGES: tuple[str, ...] = (
     "Международный аэропорт Метро",
     "Округ Уитни",
 )
-"""The places of the outbreak.
+"""Места вспышки.
 
-The wiki holds some fifty more location stubs; the umbrella ``Локации`` page
-summarises them, and the ones declared here are the stops a survivor would
-actually name.
+На вики есть ещё около пятидесяти заготовок локаций; зонтичная страница
+``Локации`` их обобщает, а объявленные здесь — остановки, которые выживший
+действительно назвал бы.
 """
 
 GAME_MODE_PAGES: tuple[str, ...] = (
@@ -256,19 +256,19 @@ GAME_MODE_PAGES: tuple[str, ...] = (
     "Режиссёр",
     "Дружественный огонь",
 )
-"""The rules that shape a run.
+"""Правила, определяющие прогон.
 
-``Выживание``, ``Реализм``, ``Сражение`` and the rest of the named modes are
-redirects into ``Игровые режимы``, which describes them all — so only the page
-that holds the text is declared.
+``Выживание``, ``Реализм``, ``Сражение`` и остальные именованные режимы —
+перенаправления на ``Игровые режимы``, где описаны все они, поэтому объявлена
+только страница, содержащая текст.
 """
 
 ACHIEVEMENT_PAGES: tuple[str, ...] = ("Достижения",)
 
 NPC_PAGES: tuple[str, ...] = ("Неигровые персонажи",)
-"""Non-playable characters.
+"""Неигровые персонажи.
 
-``Вирджил`` and ``Уитакер`` are redirects into this page.
+``Вирджил`` и ``Уитакер`` — перенаправления на эту страницу.
 """
 
 TACTIC_PAGES: tuple[str, ...] = (
@@ -277,13 +277,13 @@ TACTIC_PAGES: tuple[str, ...] = (
 )
 
 GRAFFITI_PAGE = "Граффити"
-"""Holds the inscriptions of every safe room, grouped by campaign and chapter."""
+"""Хранит надписи из каждого убежища, сгруппированные по кампании и главе."""
 
 SAFE_ROOM_PAGES: tuple[str, ...] = ("Убежище",)
 
 
 def _sources() -> tuple[WikiSource, ...]:
-    """Assemble the registry, keeping the declaration order as the fetch order."""
+    """Собрать реестр, сохраняя порядок объявления как порядок загрузки."""
     sources: list[WikiSource] = [
         WikiSource(page, LoreTopic.INFECTION, ParserKind.ARTICLE) for page in INFECTION_PAGES
     ]
@@ -324,4 +324,4 @@ def _sources() -> tuple[WikiSource, ...]:
 
 
 WIKI_SOURCES: Sequence[WikiSource] = _sources()
-"""Every page the corpus is built from, in fetch order."""
+"""Каждая страница, из которой строится корпус, в порядке загрузки."""

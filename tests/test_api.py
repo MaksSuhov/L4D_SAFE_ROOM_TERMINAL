@@ -1,7 +1,7 @@
-"""Integration tests for the HTTP layer.
+"""Интеграционные тесты HTTP-слоя.
 
-Only the outermost adapters are replaced; the real routers, dependency graph and
-RAG service are exercised, which is what verifies the wiring itself.
+Подменяются только внешние адаптеры; настоящие роутеры, граф зависимостей и
+сервис RAG работают по-настоящему, что и проверяет саму связку.
 """
 
 from __future__ import annotations
@@ -96,7 +96,9 @@ def test_chat_hands_the_two_level_brief_to_the_provider(
     client: TestClient,
     ai_client: FakeAIClient,
 ) -> None:
-    """The wiring must deliver the tiered brief, not a flat list of records."""
+    """Проверить, что связка передаёт провайдеру двухуровневый бриф, а не плоский
+    список записей.
+    """
     client.post(
         f"{API_PREFIX}/chat",
         json={"character_id": 1, "message": "How do we kill a Tank?"},
@@ -161,7 +163,9 @@ def test_health_endpoint_reports_liveness(client: TestClient) -> None:
 
 
 def test_cors_preflight_allows_the_frontend_origin(client: TestClient) -> None:
-    """The bundled frontend runs on its own dev server, so it needs CORS."""
+    """Проверить, что предварительный запрос CORS пропускает origin фронтенда: он
+    работает на собственном dev-сервере.
+    """
     response = client.options(
         f"{API_PREFIX}/chat",
         headers={

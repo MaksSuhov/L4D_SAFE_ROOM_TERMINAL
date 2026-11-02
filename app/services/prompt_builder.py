@@ -1,22 +1,22 @@
-"""Renders retrieved evidence as the two-level archive brief handed to the model.
+"""Оформляет найденные свидетельства как двухуровневую архивную сводку для модели.
 
-This module owns the *policy* of the pipeline — how a fact differs from a rumour
-and how the model is allowed to use each. Keeping it here, instead of in the
-provider adapter, means the wording can be tested without any network access and
-changed without touching the transport layer.
+Модуль отвечает за *политику* конвейера: чем факт отличается от слуха и как
+модели разрешено пользоваться каждым из них. Держать её здесь, а не в адаптере
+провайдера, — значит, что формулировки можно проверить без обращения к сети и
+поменять, не трогая транспортный слой.
 
-The brief has three blocks:
+В сводке три блока:
 
 ``<official_lore>``
-    Verified encyclopaedia material. The only place a character may take a
-    statement of fact from.
+    Проверенный энциклопедический материал. Единственный источник, из которого
+    персонаж вправе брать утверждение факта.
 ``<wall_graffiti>``
-    Messages left by other survivors on safe-room walls. Hearsay, attributed
-    aloud ("на стене написано…") and coloured by the character's temperament —
-    never presented as confirmed lore.
+    Сообщения, оставленные другими выжившими на стенах убежищ. Слухи, которые
+    пересказываются вслух («на стене написано…») и окрашиваются характером
+    персонажа — никогда не подаются как подтверждённый лор.
 ``<speech_samples>``
-    Lines actually spoken by the answering character, used as a style reference
-    so the answer sounds like them rather than like a narrator.
+    Реплики, реально произнесённые отвечающим персонажем, — образец стиля,
+    чтобы ответ звучал как он, а не как рассказчик.
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ NO_GRAFFITI: str = "(подходящих надписей на стенах н�
 
 @dataclass(frozen=True, slots=True)
 class ArchiveEvidence:
-    """The three tiers retrieved for one question."""
+    """Три уровня, найденные для одного вопроса."""
 
     official: Sequence[RetrievedChunk] = ()
     graffiti: Sequence[RetrievedChunk] = ()
@@ -77,24 +77,25 @@ class ArchiveEvidence:
 
     @property
     def is_empty(self) -> bool:
-        """Whether no tier produced a record at all."""
+        """Правда ли, что ни один уровень не дал ни одной записи."""
         return not (self.official or self.graffiti or self.voice)
 
     @property
     def all_chunks(self) -> list[RetrievedChunk]:
-        """Every retrieved record, official lore first, for the API response."""
+        """Все найденные записи, официальный лор первым, для ответа API."""
         return [*self.official, *self.graffiti, *self.voice]
 
 
 class ArchivePromptBuilder:
-    """Builds the evidence message of a chat turn from :class:`ArchiveEvidence`.
+    """Собирает сообщение с доказательствами для одного хода разговора из :class:`ArchiveEvidence`.
 
-    The builder is stateless: the persona-specific part of the prompt is the
-    character's own system prompt, so the same instance serves every request.
+    Конструктор не хранит состояния: часть промпта, зависящая от образа, — это
+    собственный системный промпт персонажа, поэтому один и тот же экземпляр
+    обслуживает любой запрос.
     """
 
     def build(self, evidence: ArchiveEvidence) -> str:
-        """Render ``evidence`` as the multi-block archive brief."""
+        """Оформить ``evidence`` как многочастную архивную сводку."""
         if evidence.is_empty:
             return ""
 
@@ -120,7 +121,7 @@ class ArchivePromptBuilder:
         matches: Sequence[RetrievedChunk],
         placeholder: str,
     ) -> list[str]:
-        """Render one numbered evidence block, or its placeholder when empty."""
+        """Оформить один нумерованный блок доказательств или заглушку, когда он пуст."""
         rendered: list[str] = ["", f"<{header}>"]
         if matches:
             rendered.extend(
@@ -134,11 +135,11 @@ class ArchivePromptBuilder:
 
     @staticmethod
     def _render_voice(matches: Sequence[RetrievedChunk]) -> list[str]:
-        """Render the character's own lines as a quoted style reference.
+        """Оформить собственные реплики персонажа как цитируемый образец стиля.
 
-        A voice sample holds several recorded lines, one per line of text, and
-        each becomes its own bullet so the model sees them as separate quotes
-        rather than as one long block.
+        Голосовой образец хранит несколько записанных реплик, по одной на строку
+        текста, и каждая становится отдельным пунктом, чтобы модель видела их как
+        отдельные цитаты, а не как один длинный блок.
         """
         rendered: list[str] = ["", f"<{VOICE_SECTION_HEADER}>"]
         for match in matches:

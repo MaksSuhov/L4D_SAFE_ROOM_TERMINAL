@@ -1,13 +1,13 @@
-"""Reading raw wikitext from the Left 4 Dead Fandom wiki.
+"""Чтение сырого викитекста из вики Left 4 Dead на Fandom.
 
-The client talks to the MediaWiki ``action=parse`` endpoint, which returns the
-source markup of a page — the raw material the parsers work on. Two properties
-matter for a reproducible pipeline:
+Клиент обращается к эндпоинту MediaWiki ``action=parse``, который возвращает
+исходную разметку страницы — сырьё, с которым работают парсеры. Для
+воспроизводимого конвейера важны два свойства:
 
-* **A disk cache.** Donated wikitext is stored under ``wiki_cache_dir`` so a
-  re-parse costs no network round trip, and the corpus can be rebuilt offline.
-* **Polite requests.** A descriptive ``User-Agent`` and bounded retries with
-  backoff, because a wiki is somebody else's server.
+* **Дисковый кэш.** Скачанный викитекст хранится в ``wiki_cache_dir``, поэтому
+  повторный разбор не тратит сетевой обход, а корпус можно пересобрать офлайн.
+* **Вежливые запросы.** Описательный ``User-Agent`` и ограниченные повторы с
+  задержкой, потому что вики — чужой сервер.
 """
 
 from __future__ import annotations
@@ -31,15 +31,15 @@ RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 MAX_ATTEMPTS = 3
 BACKOFF_SECONDS = 1.5
 UNSAFE_FILENAME_PATTERN = re.compile(r"[^\w.-]+", re.UNICODE)
-"""Characters kept in a cache filename.
+"""Символы, сохраняемые в имени файла кэша.
 
-The corpus is read from the Russian wiki, so titles are Cyrillic; an ASCII-only
-pattern would collapse every one of them to the same empty slug.
+Корпус читается из русской вики, поэтому заголовки кириллические; шаблон
+только из ASCII схлопнул бы каждый из них в один и тот же пустой слаг.
 """
 
 
 class WikiPageNotFoundError(ApplicationError):
-    """Raised when the wiki has no page with the requested title."""
+    """Возбуждается, когда на вики нет страницы с запрошенным заголовком."""
 
     def __init__(self, page: str) -> None:
         self.page = page
@@ -47,31 +47,31 @@ class WikiPageNotFoundError(ApplicationError):
 
 
 class WikitextCache:
-    """File-per-page cache of raw wikitext."""
+    """Кэш сырого викитекста: файл на страницу."""
 
     def __init__(self, directory: Path) -> None:
         self._directory = directory
 
     def path_for(self, page: str) -> Path:
-        """Return the cache file backing ``page``."""
+        """Вернуть файл кэша, обслуживающий ``page``."""
         slug = UNSAFE_FILENAME_PATTERN.sub("_", page).strip("_")
         return self._directory / f"{slug}.wikitext"
 
     def read(self, page: str) -> str | None:
-        """Return the cached markup of ``page``, or ``None`` when absent."""
+        """Вернуть закэшированную разметку ``page`` или ``None``, если её нет."""
         path = self.path_for(page)
         if not path.is_file():
             return None
         return path.read_text(encoding="utf-8")
 
     def write(self, page: str, wikitext: str) -> None:
-        """Store the markup of ``page``, creating the cache directory on demand."""
+        """Сохранить разметку ``page``, создав каталог кэша при необходимости."""
         self._directory.mkdir(parents=True, exist_ok=True)
         self.path_for(page).write_text(wikitext, encoding="utf-8")
 
 
 class MediaWikiClient:
-    """Fetches page markup, preferring the local cache over the network."""
+    """Забирает разметку страниц, предпочитая локальный кэш сети."""
 
     def __init__(
         self,
@@ -91,14 +91,14 @@ class MediaWikiClient:
         )
 
     def page_url(self, page: str) -> str:
-        """Return the readable URL of ``page``, stored as the provenance of a record."""
+        """Вернуть читаемый URL ``page``, сохраняемый как происхождение записи."""
         slug = urllib.parse.quote(page.replace(" ", "_"))
         return f"{self._settings.wiki_base_url}/wiki/{slug}"
 
     async def fetch_page(self, page: str, *, refresh: bool = False) -> str:
-        """Return the wikitext of ``page``.
+        """Вернуть викитекст ``page``.
 
-        ``refresh`` bypasses the cache and rewrites it with fresh markup.
+        ``refresh`` обходит кэш и перезаписывает его свежей разметкой.
         """
         if self._settings.wiki_cache_enabled and not refresh:
             cached = self._cache.read(page)
@@ -112,10 +112,10 @@ class MediaWikiClient:
         return wikitext
 
     async def fetch_pages(self, pages: Sequence[str], *, refresh: bool = False) -> dict[str, str]:
-        """Fetch several pages sequentially, tolerating a missing one.
+        """Забрать несколько страниц последовательно, терпя отсутствующую.
 
-        A page that vanished from the wiki must not abort the whole corpus
-        build, so the failure is logged and the page is left out.
+        Страница, исчезнувшая с вики, не должна срывать всю сборку корпуса,
+        поэтому сбой логируется, а страница пропускается.
         """
         collected: dict[str, str] = {}
         for page in pages:
@@ -126,11 +126,11 @@ class MediaWikiClient:
         return collected
 
     async def aclose(self) -> None:
-        """Release the HTTP connection pool."""
+        """Освободить пул HTTP-соединений."""
         await self._client.aclose()
 
     async def _request_wikitext(self, page: str) -> str:
-        """Call the MediaWiki API, retrying transient failures."""
+        """Вызвать API MediaWiki, повторяя при временных сбоях."""
         last_error: Exception | None = None
         for attempt in range(1, MAX_ATTEMPTS + 1):
             try:
@@ -172,7 +172,7 @@ class MediaWikiClient:
 
     @staticmethod
     def _extract_wikitext(page: str, payload: str) -> str:
-        """Pull the markup out of an ``action=parse`` response."""
+        """Извлечь разметку из ответа ``action=parse``."""
         try:
             document = json.loads(payload)
         except json.JSONDecodeError as error:

@@ -1,7 +1,7 @@
-"""Repository layer: the only place that knows SQL.
+"""Слой репозиториев: единственное место, которое знает SQL.
 
-Repositories hide query construction behind intention-revealing methods, so the
-service layer never touches ``select()`` or the session API directly.
+Репозитории прячут построение запросов за методами с говорящими именами, так
+что слой сервисов никогда не трогает ``select()`` или API сессии напрямую.
 """
 
 from __future__ import annotations
@@ -25,12 +25,13 @@ from app.taxonomy import SourceType
 ModelT = TypeVar("ModelT", bound=Base)
 
 HASH_LOOKUP_CHUNK_SIZE = 1000
-"""Upper bound on the parameters of one ``IN (...)`` lookup, so a large corpus
-never produces a statement the server refuses to plan."""
+"""Верхняя граница числа параметров одной выборки ``IN (...)``: большой корпус
+никогда не породит запрос, который сервер откажется планировать.
+"""
 
 
 class BaseRepository(Generic[ModelT]):
-    """Persistence behaviour shared by every repository of a single model."""
+    """Поведение сохранения, общее для каждого репозитория одной модели."""
 
     model: type[ModelT]
 
@@ -39,56 +40,56 @@ class BaseRepository(Generic[ModelT]):
 
     @property
     def session(self) -> AsyncSession:
-        """The unit of work this repository participates in."""
+        """Единица работы, в которой участвует этот репозиторий."""
         return self._session
 
     async def get_by_id(self, entity_id: int) -> ModelT | None:
-        """Fetch an entity by primary key using the identity map when possible."""
+        """Получить сущность по первичному ключу, по возможности через карту идентичности."""
         return await self._session.get(self.model, entity_id)
 
     async def add(self, instance: ModelT) -> ModelT:
-        """Persist ``instance`` and refresh it so server defaults are populated."""
+        """Сохранить ``instance`` и обновить его, чтобы заполнить значения по умолчанию."""
         self._session.add(instance)
         await self._session.flush()
         await self._session.refresh(instance)
         return instance
 
     async def count(self) -> int:
-        """Return the number of rows of this model."""
+        """Вернуть число строк этой модели."""
         statement = select(func.count()).select_from(self.model)
         result = await self._session.execute(statement)
         return int(result.scalar_one())
 
 
 class CharacterRepository(BaseRepository[Character], CharacterRepositoryProtocol):
-    """Read access to the survivor personas stored in ``characters``."""
+    """Доступ на чтение к образам выживших, хранящимся в ``characters``."""
 
     model = Character
 
     async def get_all(self) -> Sequence[Character]:
-        """Return every character ordered by identifier."""
+        """Вернуть всех персонажей, упорядоченных по идентификатору."""
         statement = select(Character).order_by(Character.id)
         result = await self._session.execute(statement)
         return result.scalars().all()
 
     async def get_by_name(self, name: str) -> Character | None:
-        """Look up a character by its unique display name."""
+        """Найти персонажа по его уникальному отображаемому имени."""
         statement = select(Character).where(Character.name == name)
         result = await self._session.execute(statement)
         return result.scalar_one_or_none()
 
 
 class LoreChunkRepository(BaseRepository[LoreChunk], LoreChunkRepositoryProtocol):
-    """Storage and cosine-similarity search over the lore knowledge base."""
+    """Хранение и поиск по косинусной близости в базе знаний лора."""
 
     model = LoreChunk
 
     async def create_chunk(self, record: EmbeddedLoreChunk) -> LoreChunk:
-        """Persist one embedded lore fragment."""
+        """Сохранить один проиндексированный фрагмент лора."""
         return await self.add(self._to_model(record))
 
     async def create_chunks(self, records: Sequence[EmbeddedLoreChunk]) -> Sequence[LoreChunk]:
-        """Persist a batch of embedded lore fragments in a single flush."""
+        """Сохранить пакет проиндексированных фрагментов лора за один flush."""
         if not records:
             return []
         chunks = [self._to_model(record) for record in records]
@@ -105,11 +106,11 @@ class LoreChunkRepository(BaseRepository[LoreChunk], LoreChunkRepositoryProtocol
         topic: str | None = None,
         character_name: str | None = None,
     ) -> Sequence[RetrievedChunk]:
-        """Return the ``limit`` nearest chunks ordered by descending cosine similarity.
+        """Вернуть ``limit`` ближайших фрагментов по убыванию косинусной близости.
 
-        pgvector exposes the cosine *distance* (``1 - similarity``); the operator
-        ``<=>`` is rendered by ``cosine_distance`` and can be accelerated by the
-        HNSW index declared on the model.
+        pgvector выдаёт косинусное *расстояние* (``1 - similarity``); оператор ``<=>``
+        строится через ``cosine_distance`` и может ускоряться HNSW-индексом,
+        объявленным на модели.
         """
         distance = LoreChunk.embedding.cosine_distance(list(query_embedding)).label(
             "cosine_distance"
@@ -131,13 +132,13 @@ class LoreChunkRepository(BaseRepository[LoreChunk], LoreChunkRepositoryProtocol
         ]
 
     async def delete_all(self) -> int:
-        """Remove every stored fragment and report how many rows went.
+        """Удалить все сохранённые фрагменты и сообщить, сколько строк ушло.
 
-        Ingestion is incremental — a record whose text changed is stored again
-        under a new hash rather than replacing the old row — so re-indexing a
-        corpus that was edited in place needs an explicit wipe first. The method
-        is deliberately absent from the repository port: no service is allowed to
-        empty the archive, only the seeding tool that owns its lifecycle.
+        Индексация инкрементальна — запись, чей текст изменился, сохраняется заново
+        под новым хешем, а не заменяет старую строку, — поэтому повторная индексация
+        корпуса, отредактированного на месте, сначала требует явной очистки. Метод
+        намеренно отсутствует в порту репозитория: ни один сервис не вправе опустошить
+        архив, только инструмент наполнения, владеющий его жизненным циклом.
         """
         result = await self._session.execute(delete(LoreChunk))
         # A DELETE returns a cursor result, which is the only kind that reports
@@ -146,7 +147,7 @@ class LoreChunkRepository(BaseRepository[LoreChunk], LoreChunkRepositoryProtocol
         return int(result.rowcount or 0)
 
     async def existing_content_hashes(self, hashes: Sequence[str]) -> set[str]:
-        """Return which of the given content hashes are already stored."""
+        """Вернуть, какие из данных хешей содержимого уже сохранены."""
         wanted = list(dict.fromkeys(hashes))
         found: set[str] = set()
         for start in range(0, len(wanted), HASH_LOOKUP_CHUNK_SIZE):
@@ -158,7 +159,7 @@ class LoreChunkRepository(BaseRepository[LoreChunk], LoreChunkRepositoryProtocol
 
     @staticmethod
     def _to_model(record: EmbeddedLoreChunk) -> LoreChunk:
-        """Translate a corpus record into its ORM representation."""
+        """Перевести запись корпуса в её ORM-представление."""
         return LoreChunk(
             content=record.content,
             content_hash=record.content_hash,

@@ -1,4 +1,4 @@
-"""Tests for the ingestion services: embedding, deduplication, snapshot, translation."""
+"""Тесты служб загрузки: эмбеддинг, дедупликация, снимок, перевод."""
 
 from __future__ import annotations
 
@@ -99,7 +99,9 @@ class TestLoreIngestionService:
         ]
 
     async def test_embeddings_travel_in_one_batch(self) -> None:
-        """One request per record would make a corpus of hundreds needlessly slow."""
+        """Проверить, что эмбеддинги уходят одним батчем: по запросу на запись корпус из
+        сотен записей стал бы незачем медленным.
+        """
         ai_client = FakeAIClient()
 
         await LoreIngestionService(InMemoryLoreChunkRepository(), ai_client).ingest(bullets())

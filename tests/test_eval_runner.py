@@ -1,9 +1,8 @@
-"""Tests for the evaluation runner, driven entirely by fakes.
+"""Тесты прогона оценки, целиком работающие на заглушках.
 
-The whole run is exercised without a database, a provider or a network: an
-in-memory repository feeds the real ``RAGService``, a stubbed model streams the
-answer, a stub judge returns fixed scores and a fake clock makes the timings
-exact.
+Весь прогон проверяется без базы, провайдера и сети: репозиторий в памяти
+питает настоящий ``RAGService``, заглушка модели стримит ответ, заглушка судьи
+возвращает фиксированные баллы, а поддельные часы делают замеры точными.
 """
 
 from __future__ import annotations
@@ -39,7 +38,7 @@ CASE = EvalCase(
 
 
 class StubJudge:
-    """Judge that returns the same verdict for every case and records the calls."""
+    """Судья, возвращающий один и тот же вердикт для каждого кейса и записывающий вызовы."""
 
     def __init__(self, verdict: JudgeScore = VERDICT) -> None:
         self._verdict = verdict
@@ -65,7 +64,7 @@ def build_evaluator(
     judge: StubJudge,
     clock: FakeClock | None = None,
 ) -> tuple[CaseEvaluator, FakeAIClient]:
-    """Assemble the real RAG pipeline over fakes and wrap it in an evaluator."""
+    """Собрать настоящий конвейер RAG на заглушках и обернуть его в оценщик."""
     model = FakeAIClient(stream_fragments=fragments)
     rag_service = RAGService(
         InMemoryCharacterRepository(
@@ -97,7 +96,7 @@ def build_evaluator(
 
 
 async def empty_stream() -> AsyncIterator[str]:
-    """An async iterator that produces nothing at all."""
+    """Асинхронный итератор, не порождающий ничего."""
     fragments: list[str] = []
     for fragment in fragments:
         yield fragment

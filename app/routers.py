@@ -1,4 +1,4 @@
-"""HTTP layer: routing, request validation and error translation only."""
+"""HTTP-слой: только маршрутизация, валидация запросов и перевод ошибок."""
 
 from __future__ import annotations
 
@@ -24,10 +24,10 @@ router = APIRouter()
     "/health",
     response_model=HealthResponse,
     tags=["system"],
-    summary="Readiness probe",
+    summary="Проверка готовности",
 )
 async def health(settings: SettingsDep, session: SessionDep) -> HealthResponse:
-    """Report process liveness together with the reachability of PostgreSQL."""
+    """Сообщить о живости процесса вместе с доступностью PostgreSQL."""
     try:
         await session.execute(text("SELECT 1"))
         database_status = "ok"
@@ -48,10 +48,10 @@ async def health(settings: SettingsDep, session: SessionDep) -> HealthResponse:
     "/characters",
     response_model=list[CharacterRead],
     tags=["characters"],
-    summary="List the survivors available at the terminal",
+    summary="Список выживших, доступных на терминале",
 )
 async def list_characters(characters: CharacterRepositoryDep) -> Sequence[Character]:
-    """Return every persona the terminal can impersonate."""
+    """Вернуть каждый образ, в который терминал умеет перевоплощаться."""
     return await characters.get_all()
 
 
@@ -59,9 +59,9 @@ async def list_characters(characters: CharacterRepositoryDep) -> Sequence[Charac
     "/chat",
     response_model=ChatResponse,
     tags=["chat"],
-    summary="Ask a survivor a question",
-    responses={404: {"description": "The requested character does not exist"}},
+    summary="Задать вопрос выжившему",
+    responses={404: {"description": "Запрошенного персонажа нет"}},
 )
 async def chat(payload: ChatRequest, rag_service: RAGServiceDep) -> ChatResponse:
-    """Run the RAG pipeline and answer as the requested character."""
+    """Прогнать RAG-конвейер и ответить от имени запрошенного персонажа."""
     return await rag_service.process_chat_message(payload.character_id, payload.message)

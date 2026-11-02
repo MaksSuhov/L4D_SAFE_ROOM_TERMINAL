@@ -1,8 +1,8 @@
-"""Application entry point.
+"""Точка входа приложения.
 
-The module wires the layers together: it creates the shared infrastructure
-(engine, AI client) during the lifespan, registers the routers and translates
-domain exceptions into HTTP responses.
+Модуль связывает слои: создаёт общую инфраструктуру (движок, AI-клиент) на
+протяжении жизненного цикла, регистрирует роутеры и переводит доменные
+исключения в HTTP-ответы.
 """
 
 from __future__ import annotations
@@ -22,14 +22,14 @@ from app.routers import router as api_router
 from app.services import OpenAIClient
 
 DESCRIPTION: str = (
-    "Interactive safe-room terminal from Left 4 Dead. Survivor personas answer "
-    "player questions using a pgvector-backed lore archive and the OpenAI API."
+    "Интерактивный терминал убежища из Left 4 Dead. Образы выживших отвечают на "
+    "вопросы игрока, опираясь на архив лора в pgvector и OpenAI API."
 )
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-    """Create shared resources on start-up and release them on shutdown."""
+    """Создать общие ресурсы при запуске и освободить их при остановке."""
     settings: Settings = get_settings()
 
     database = Database(settings)
@@ -49,7 +49,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
 
 async def handle_resource_not_found(request: Request, exc: Exception) -> JSONResponse:
-    """Translate a missing entity into ``404 Not Found``."""
+    """Перевести отсутствующую сущность в ``404 Not Found``."""
     assert isinstance(exc, ResourceNotFoundError)
     return JSONResponse(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -58,7 +58,7 @@ async def handle_resource_not_found(request: Request, exc: Exception) -> JSONRes
 
 
 async def handle_ai_service_error(request: Request, exc: Exception) -> JSONResponse:
-    """Translate a provider failure into ``502 Bad Gateway``."""
+    """Перевести сбой провайдера в ``502 Bad Gateway``."""
     assert isinstance(exc, AIServiceError)
     return JSONResponse(
         status_code=status.HTTP_502_BAD_GATEWAY,
@@ -67,7 +67,7 @@ async def handle_ai_service_error(request: Request, exc: Exception) -> JSONRespo
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    """Build the FastAPI application; accepts settings to ease testing."""
+    """Собрать приложение FastAPI; принимает настройки, чтобы упростить тесты."""
     active_settings: Settings = settings or get_settings()
 
     application = FastAPI(

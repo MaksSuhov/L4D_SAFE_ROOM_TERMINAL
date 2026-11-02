@@ -1,18 +1,18 @@
-"""Domain-level exceptions.
+"""Исключения уровня домена.
 
-They carry no knowledge of HTTP; the API layer translates them into status
-codes so that services stay framework agnostic.
+Они ничего не знают про HTTP; слой API переводит их в коды состояния, чтобы
+сервисы оставались независимы от фреймворка.
 """
 
 from __future__ import annotations
 
 
 class ApplicationError(Exception):
-    """Base class for every expected failure raised by the application."""
+    """Базовый класс для каждого ожидаемого сбоя, поднятого приложением."""
 
 
 class ResourceNotFoundError(ApplicationError):
-    """Raised when an entity referenced by a request does not exist."""
+    """Поднимается, когда сущность, на которую ссылается запрос, не существует."""
 
     def __init__(self, resource: str, identifier: int | str) -> None:
         self.resource = resource
@@ -21,15 +21,15 @@ class ResourceNotFoundError(ApplicationError):
 
 
 class CharacterNotFoundError(ResourceNotFoundError):
-    """Raised when the requested character persona is absent from the database."""
+    """Поднимается, когда запрошенного образа персонажа нет в базе данных."""
 
     def __init__(self, character_id: int) -> None:
         super().__init__("Character", character_id)
 
 
 class AIServiceError(ApplicationError):
-    """Raised when the OpenAI provider fails or is misconfigured."""
+    """Поднимается, когда провайдер OpenAI даёт сбой или настроен неверно."""
 
 
 class EvaluationError(ApplicationError):
-    """Raised when the evaluation harness cannot read a case or score an answer."""
+    """Поднимается, когда стенд оценки не может прочитать кейс или оценить ответ."""

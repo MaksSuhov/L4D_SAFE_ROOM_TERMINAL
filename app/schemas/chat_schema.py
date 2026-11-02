@@ -1,4 +1,4 @@
-"""Schemas describing the chat request/response contract."""
+"""Схемы, описывающие контракт запроса и ответа чата."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from app.schemas.lore_schema import LoreSource
 
 
 class ChatRequest(BaseModel):
-    """Incoming question addressed to a character."""
+    """Входящий вопрос, адресованный персонажу."""
 
-    character_id: int = Field(gt=0, description="Identifier of the answering character.")
+    character_id: int = Field(gt=0, description="Идентификатор персонажа, который отвечает.")
     message: str = Field(min_length=1, max_length=2000)
 
     @field_validator("message")
@@ -23,7 +23,7 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    """Answer produced by the RAG pipeline together with its evidence."""
+    """Ответ, сгенерированный RAG-конвейером, вместе с его доказательствами."""
 
     character_id: int
     character_name: str

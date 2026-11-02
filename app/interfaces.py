@@ -1,9 +1,9 @@
-"""Ports of the application (Dependency Inversion Principle).
+"""Порты приложения (принцип инверсии зависимостей).
 
-The service layer depends on these ``Protocol`` definitions rather than on the
-concrete SQLAlchemy repositories or on the OpenAI SDK wrapper. Any object with a
-matching shape — a real adapter, a fake used in tests, or a future vector
-database client — can be injected instead.
+Слой сервисов зависит от этих определений ``Protocol``, а не от конкретных
+репозиториев SQLAlchemy или обёртки над OpenAI SDK. Вместо них можно внедрить
+любой объект подходящей формы — настоящий адаптер, заглушку из тестов или
+будущий клиент векторной базы.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from app.taxonomy import SourceType
 
 
 class RetrievedChunk(NamedTuple):
-    """A lore chunk paired with the cosine similarity of a search query."""
+    """Фрагмент лора вместе с косинусной близостью поискового запроса."""
 
     chunk: LoreChunk
     similarity: float
@@ -26,12 +26,12 @@ class RetrievedChunk(NamedTuple):
 
 @dataclass(frozen=True, slots=True)
 class PreparedChat:
-    """Everything a single chat turn needs once retrieval has run.
+    """Всё, что нужно одному ходу чата после выполнения выборки.
 
-    It is the seam between the two halves of the pipeline: retrieval fills it in
-    (question -> evidence -> brief), and generation only needs what is stored
-    here. Exposing it lets a caller stream the answer and keep the evidence,
-    which is exactly what the offline evaluation harness does.
+    Это стык между двумя половинами конвейера: выборка его заполняет
+    (вопрос -> доказательства -> брифинг), а генерации нужно только то, что здесь
+    хранится. Открыв его наружу, вызывающий код может стримить ответ и сохранять
+    доказательства — именно так и поступает офлайн-стенд оценки.
     """
 
     character_id: int
@@ -44,26 +44,26 @@ class PreparedChat:
 
 
 class CharacterRepositoryProtocol(Protocol):
-    """Read access to character personas."""
+    """Доступ на чтение к образам персонажей."""
 
     async def get_by_id(self, entity_id: int) -> Character | None:
-        """Return the character with the given identifier, or ``None``."""
+        """Вернуть персонажа с данным идентификатором или ``None``."""
         ...
 
     async def get_all(self) -> Sequence[Character]:
-        """Return every stored character ordered by identifier."""
+        """Вернуть всех сохранённых персонажей, упорядоченных по идентификатору."""
         ...
 
 
 class LoreChunkRepositoryProtocol(Protocol):
-    """Persistence and vector search over lore fragments."""
+    """Сохранение и векторный поиск по фрагментам лора."""
 
     async def create_chunk(self, record: EmbeddedLoreChunk) -> LoreChunk:
-        """Persist a single embedded lore fragment."""
+        """Сохранить один проиндексированный фрагмент лора."""
         ...
 
     async def create_chunks(self, records: Sequence[EmbeddedLoreChunk]) -> Sequence[LoreChunk]:
-        """Persist several embedded lore fragments in one round trip."""
+        """Сохранить несколько проиндексированных фрагментов лора за один запрос."""
         ...
 
     async def search_similar_chunks(
@@ -75,49 +75,48 @@ class LoreChunkRepositoryProtocol(Protocol):
         topic: str | None = None,
         character_name: str | None = None,
     ) -> Sequence[RetrievedChunk]:
-        """Return the ``limit`` closest chunks ordered by descending similarity.
+        """Вернуть ``limit`` ближайших фрагментов по убыванию близости.
 
-        ``source_types`` restricts the search to one or more evidence tiers,
-        which is what makes the two-level retrieval possible: the facts are
-        looked up among the official records while the rumours are looked up
-        among the graffiti.
+        ``source_types`` ограничивает поиск одним или несколькими уровнями
+        доказательств — именно это делает двухуровневую выборку возможной: факты
+        ищутся среди официальных записей, а слухи — среди надписей на стенах.
         """
         ...
 
     async def existing_content_hashes(self, hashes: Sequence[str]) -> set[str]:
-        """Return which of the given content hashes are already stored."""
+        """Вернуть, какие из данных хешей содержимого уже сохранены."""
         ...
 
     async def count(self) -> int:
-        """Return the number of stored lore fragments."""
+        """Вернуть число сохранённых фрагментов лора."""
         ...
 
 
 class AIClientProtocol(Protocol):
-    """Access to the language model provider."""
+    """Доступ к провайдеру языковой модели."""
 
     model_name: str
-    """Name of the chat model, surfaced in API responses."""
+    """Имя чат-модели; показывается в ответах API."""
 
     async def get_embedding(self, text: str) -> list[float]:
-        """Embed ``text`` into a vector of ``embedding_dimensions`` floats."""
+        """Посчитать эмбеддинг ``text`` в вектор из ``embedding_dimensions`` чисел."""
         ...
 
     async def get_embeddings(self, texts: Sequence[str]) -> list[list[float]]:
-        """Embed a batch of texts, preserving their order.
+        """Посчитать эмбеддинги пакета текстов, сохранив их порядок.
 
-        Batching matters: the corpus holds hundreds of records, and one request
-        per record would turn seeding into a coffee break.
+        Пакетность важна: корпус содержит сотни записей, и запрос на каждую запись
+        превратил бы наполнение базы в перерыв на кофе.
         """
         ...
 
     async def translate_texts(self, texts: Sequence[str]) -> list[str]:
-        """Translate a batch of texts into the configured corpus language.
+        """Перевести пакет текстов на заданный язык корпуса.
 
-        Used once, while the corpus is built, so an English wiki becomes a
-        corpus in the language the terminal answers in. Implementations must
-        return exactly one translation per input, falling back to the original
-        text rather than dropping a record.
+        Используется один раз, пока строится корпус, так что английская вики
+        превращается в корпус на том языке, на котором отвечает терминал. Реализации
+        обязаны вернуть ровно один перевод на вход, откатываясь к исходному тексту
+        вместо того, чтобы выбросить запись.
         """
         ...
 
@@ -128,7 +127,7 @@ class AIClientProtocol(Protocol):
         user_message: str,
         few_shot_examples: Sequence[Mapping[str, str]] | None = None,
     ) -> str:
-        """Produce the assistant answer grounded in ``context``."""
+        """Сгенерировать ответ ассистента, опираясь на ``context``."""
         ...
 
     def stream_response(
@@ -138,11 +137,11 @@ class AIClientProtocol(Protocol):
         user_message: str,
         few_shot_examples: Sequence[Mapping[str, str]] | None = None,
     ) -> AsyncIterator[str]:
-        """Yield the answer piece by piece, in the order the provider sends it.
+        """Отдавать ответ по фрагментам, в том порядке, в котором их шлёт провайдер.
 
-        The same answer as :meth:`generate_response`, only delivered as a stream
-        of fragments. Streaming is what makes the time to the first token
-        observable: until the first fragment arrives, nothing has been produced.
+        Тот же ответ, что и у :meth:`generate_response`, только доставляемый потоком
+        фрагментов. Стриминг делает наблюдаемым время до первого токена: пока не
+        пришёл первый фрагмент, ничего ещё не сгенерировано.
         """
         ...
 
@@ -153,10 +152,10 @@ class AIClientProtocol(Protocol):
         *,
         temperature: float = 0.0,
     ) -> str:
-        """Answer a single instruction, without retrieval and without personas.
+        """Ответить на одну инструкцию, без выборки и без персонажей.
 
-        A low-level entry point for tasks that only need a model reply: judging
-        an answer, classifying a text, extracting a field. The temperature is an
-        argument here because such tasks want determinism, not creativity.
+        Низкоуровневая точка входа для задач, которым нужен только ответ модели:
+        оценить ответ, классифицировать текст, извлечь поле. Температура здесь
+        аргумент, потому что такие задачи хотят детерминизма, а не творчества.
         """
         ...

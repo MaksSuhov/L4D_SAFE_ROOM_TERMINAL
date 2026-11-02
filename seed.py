@@ -1,22 +1,21 @@
-"""Database bootstrap and corpus ingestion.
+"""Наполнение базы и индексация корпуса.
 
-Brings the database to the state the terminal expects: the schema, the eight
-survivor personas and the embedded lore archive. The script is safe to re-run —
-personas are updated in place and lore records are deduplicated by a hash of
-their text, so a second run neither duplicates rows nor pays for embeddings
-twice.
+Приводит базу к состоянию, которого ждёт терминал: схема, восемь образов
+выживших и проиндексированный архив лора. Скрипт безопасно запускать повторно —
+образы обновляются на месте, а записи лора дедуплицируются по хэшу их текста,
+поэтому второй прогон не дублирует строки и не платит за эмбеддинги дважды.
 
-Usage:
-    python seed.py                    # schema + personas + corpus from the snapshot
-    python seed.py --reset            # drop every table first, then do the above
-    python seed.py --refresh          # re-fetch the corpus from the wiki first
-    python seed.py --refresh --translate      # ... and normalise it into Russian
-    python seed.py --refresh --corpus-only    # rebuild the snapshot and stop
-    python seed.py --reingest                 # wipe the archive, then ingest the snapshot
+Использование:
+    python seed.py                    # схема + образы + корпус из снимка
+    python seed.py --reset            # сначала сбросить все таблицы, затем всё вышеперечисленное
+    python seed.py --refresh          # сначала заново скачать корпус из вики
+    python seed.py --refresh --translate      # ... и нормализовать его в русский
+    python seed.py --refresh --corpus-only    # пересобрать снимок и остановиться
+    python seed.py --reingest                 # стереть архив, затем проиндексировать снимок
 
-The wiki is the source of truth for the lore; ``data/corpus/lore.jsonl`` is the
-snapshot that was extracted from it, and ``--refresh`` regenerates that
-snapshot. See ``app/ingestion`` for the pipeline.
+Вики — источник истины для лора; ``data/corpus/lore.jsonl`` — снимок, который
+из неё извлекли, а ``--refresh`` пересобирает этот снимок. Конвейер см. в
+``app/ingestion``.
 """
 
 from __future__ import annotations
@@ -61,17 +60,17 @@ ARCHIVE_RULES: str = (
     "- Держи ответ в двух–четырёх предложениях.\n"
     "- Никогда не упоминай, что ты языковая модель или ИИ."
 )
-"""Shared behaviour of every persona.
+"""Общее поведение для каждого образа.
 
-The persona block above it carries the character; these rules carry the
-pipeline contract — what may be stated as fact, what must be quoted as hearsay
-— and they are identical for all eight survivors on purpose, so the pipeline
-behaves the same whoever answers.
+Блок образа выше несёт характер персонажа; эти правила несут контракт
+конвейера — что можно утверждать как факт, а что нужно передавать как слух —
+и они намеренно одинаковы для всех восьми выживших, чтобы конвейер вёл себя
+одинаково, кто бы ни отвечал.
 """
 
 
 class CharacterSeed(TypedDict):
-    """Shape of a persona definition loaded by the seeder."""
+    """Структура определения образа, которое загружает скрипт наполнения базы."""
 
     name: str
     system_prompt: str
@@ -79,7 +78,7 @@ class CharacterSeed(TypedDict):
 
 
 def persona(voice: str) -> str:
-    """Compose a persona prompt from its voice paragraph and the archive rules."""
+    """Собрать промпт образа из абзаца с его манерой речи и правил архива."""
     return f"{voice}\n\n{ARCHIVE_RULES}"
 
 
@@ -329,11 +328,11 @@ CHARACTER_SEEDS: Sequence[CharacterSeed] = (
 
 
 class DatabaseSeeder:
-    """Creates the schema and loads the personas and the embedded corpus.
+    """Создаёт схему и загружает образы и проиндексированный корпус.
 
-    The seeder is a composition root: it receives already constructed
-    infrastructure instead of building it, so the same class can be reused by a
-    CLI script, a test or a future admin endpoint.
+    Seed-скрипт — это композиционный корень: он получает уже собранную
+    инфраструктуру вместо того, чтобы строить её сам, поэтому один и тот же класс
+    переиспользуется в CLI-скрипте, тесте или будущем админском эндпоинте.
     """
 
     def __init__(
@@ -355,7 +354,7 @@ class DatabaseSeeder:
         reingest: bool = False,
         documents: Sequence[LoreChunkCreate] = (),
     ) -> None:
-        """Prepare the schema, then upsert the personas and ingest the corpus."""
+        """Подготовить схему, затем вставить или обновить образы и проиндексировать корпус."""
         await self._prepare_schema(reset=reset)
         await self._seed_characters()
         await self._seed_lore(documents, reingest=reingest)
@@ -368,11 +367,11 @@ class DatabaseSeeder:
         logger.info("Schema is ready (pgvector extension enabled)")
 
     async def _seed_characters(self) -> None:
-        """Insert missing personas and refresh the ones whose prompt changed.
+        """Вставить отсутствующие образы и обновить те, у которых изменился промпт.
 
-        Updating in place means an edited persona takes effect on the next run:
-        having to reset the whole database to change a line of dialogue would
-        make the personas impossible to iterate on.
+        Обновление на месте означает, что правка образа вступает в силу на следующем
+        прогоне: сбрасывать всю базу ради одной изменённой реплики — значит сделать
+        образы невозможными для итерации.
         """
         inserted = 0
         updated = 0
@@ -420,7 +419,7 @@ class DatabaseSeeder:
 
 
 def build_parsers() -> dict[ParserKind, CorpusParser]:
-    """Instantiate the parser of every known page layout."""
+    """Создать парсер для каждой известной разметки страницы."""
     cleaner = WikitextCleaner()
     return {
         ParserKind.GRAFFITI: GraffitiParser(cleaner),
@@ -436,7 +435,7 @@ async def refresh_corpus(
     *,
     translate: bool,
 ) -> None:
-    """Re-fetch the wiki and write a fresh corpus snapshot."""
+    """Заново скачать вики и записать свежий снимок корпуса."""
     if translate and ai_client is None:
         raise ApplicationError(
             "Translation needs an AI provider; set AI_API_KEY or pass --no-translate"
@@ -467,7 +466,7 @@ async def main(
     translate: bool = False,
     corpus_only: bool = False,
 ) -> None:
-    """Wire the dependencies, run the requested steps and release the resources."""
+    """Собрать зависимости, выполнить запрошенные шаги и освободить ресурсы."""
     settings: Settings = get_settings()
 
     # A provider is needed for everything except rebuilding the snapshot from the
@@ -508,37 +507,37 @@ async def main(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Seed the Safe-Room Terminal database.")
+    parser = argparse.ArgumentParser(description="Наполнить базу Safe-Room Terminal.")
     parser.add_argument(
         "--reset",
         action="store_true",
-        help="drop every table before seeding",
+        help="удалить все таблицы перед наполнением",
     )
     parser.add_argument(
         "--refresh",
         action="store_true",
-        help="re-fetch the corpus from the Left 4 Dead Fandom wiki before seeding",
+        help="перечитать корпус из вики Left 4 Dead на Fandom перед наполнением",
     )
     parser.add_argument(
         "--translate",
         action="store_true",
         help=(
-            "normalise the corpus into CORPUS_LANGUAGE while refreshing; a slow, "
-            "paid pass over every record, off by default"
+            "при обновлении нормализовать корпус в CORPUS_LANGUAGE; медленный "
+            "и платный проход по всем записям, по умолчанию выключен"
         ),
     )
     parser.add_argument(
         "--reingest",
         action="store_true",
         help=(
-            "wipe the lore archive before ingesting, so a snapshot whose text "
-            "changed replaces the old records instead of adding to them"
+            "очистить архив лора перед загрузкой, чтобы снимок с изменившимся "
+            "текстом заменял старые записи, а не добавлялся к ним"
         ),
     )
     parser.add_argument(
         "--corpus-only",
         action="store_true",
-        help="rebuild the corpus snapshot and stop, without touching the database",
+        help="пересобрать снимок корпуса и остановиться, не трогая базу",
     )
     return parser.parse_args()
 

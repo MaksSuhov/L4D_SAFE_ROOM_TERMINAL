@@ -1,4 +1,4 @@
-"""Tests for the LLM judge, running against a stub completion model."""
+"""Тесты LLM-судьи, работающие против заглушки модели дополнений."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from tests.fakes import FakeAIClient
 
 
 def judge_with(reply: str) -> tuple[LLMJudge, FakeAIClient]:
-    """Build a judge whose model always answers with ``reply``."""
+    """Собрать судью, модель которого всегда отвечает ``reply``."""
     model = FakeAIClient(completion=reply)
     return LLMJudge(model), model
 

@@ -1,8 +1,8 @@
-"""ORM models of the application.
+"""ORM-модели приложения.
 
-The package facade re-exports every mapper, so the rest of the code keeps a
-single stable import path (``from app.models import Character``) while the
-definitions live in one module per aggregate.
+Фасад пакета реэкспортирует каждый маппер, поэтому остальной код сохраняет
+единый стабильный путь импорта (``from app.models import Character``), пока
+определения живут по одному модулю на агрегат.
 """
 
 from app.models.character_model import Character

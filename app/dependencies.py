@@ -1,8 +1,8 @@
-"""Dependency-injection providers for the API layer.
+"""Провайдеры внедрения зависимостей для слоя API.
 
-Every object the routers need is built here and injected with ``Depends``: the
-session lives for the duration of a request, repositories are bound to that
-session, and the RAG service receives the abstractions it declares.
+Здесь строится каждый объект, нужный роутерам, и внедряется через ``Depends``:
+сессия живёт на протяжении запроса, репозитории привязаны к этой сессии, а
+RAG-сервис получает те абстракции, которые объявляет.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from app.services import ArchivePromptBuilder, RAGService, RetrievalPolicy, Tier
 
 
 async def get_database(request: Request) -> Database:
-    """Return the database handle created by the application lifespan."""
+    """Вернуть дескриптор базы, созданный жизненным циклом приложения."""
     database: Database | None = getattr(request.app.state, "database", None)
     if database is None:
         raise RuntimeError("Database is not initialised; the application lifespan did not run")
@@ -32,13 +32,13 @@ async def get_database(request: Request) -> Database:
 async def get_session(
     database: Annotated[Database, Depends(get_database)],
 ) -> AsyncIterator[AsyncSession]:
-    """Yield a request-scoped session and close it once the response is produced."""
+    """Отдать сессию в пределах запроса и закрыть её после формирования ответа."""
     async with database.session() as session:
         yield session
 
 
 async def get_ai_client(request: Request) -> AIClientProtocol:
-    """Return the shared AI client created by the application lifespan."""
+    """Вернуть общий AI-клиент, созданный жизненным циклом приложения."""
     client: AIClientProtocol | None = getattr(request.app.state, "ai_client", None)
     if client is None:
         raise AIServiceError("AI client is not initialised; the application lifespan did not run")
@@ -48,23 +48,23 @@ async def get_ai_client(request: Request) -> AIClientProtocol:
 def get_character_repository(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CharacterRepository:
-    """Bind a character repository to the request-scoped session."""
+    """Привязать репозиторий персонажей к сессии в пределах запроса."""
     return CharacterRepository(session)
 
 
 def get_lore_chunk_repository(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> LoreChunkRepository:
-    """Bind a lore repository to the request-scoped session."""
+    """Привязать репозиторий лора к сессии в пределах запроса."""
     return LoreChunkRepository(session)
 
 
 def get_prompt_builder() -> ArchivePromptBuilder:
-    """Return the renderer of the tiered archive brief.
+    """Вернуть сборщик многоуровневого брифинга по архиву.
 
-    It is stateless, so a single instance could serve the whole process; the
-    provider keeps the dependency graph uniform and makes it trivial to swap in
-    a different prompt policy from a test.
+    Он не хранит состояния, так что одного экземпляра хватило бы на весь процесс;
+    провайдер сохраняет единообразие графа зависимостей и позволяет тривиально
+    подменить политику промптов из теста.
     """
     return ArchivePromptBuilder()
 
@@ -76,7 +76,7 @@ def get_rag_service(
     ai_client: Annotated[AIClientProtocol, Depends(get_ai_client)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> RAGService:
-    """Assemble the RAG pipeline from its collaborators and the configuration."""
+    """Собрать RAG-конвейер из его зависимостей и конфигурации."""
     return RAGService(
         character_repository,
         lore_chunk_repository,

@@ -31,7 +31,7 @@ logger = logging.getLogger("l4d.eval")
 
 def parse_args() -> argparse.Namespace:
     """Разобрать аргументы командной строки."""
-    parser = argparse.ArgumentParser(description="Evaluate the terminal with an LLM judge.")
+    parser = argparse.ArgumentParser(description="Оценить терминал с помощью LLM-судьи.")
     parser.add_argument(
         "--dataset",
         type=Path,

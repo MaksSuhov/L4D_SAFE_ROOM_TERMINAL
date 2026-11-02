@@ -1,14 +1,3 @@
-"""Чтение оценок из JSONL-датасета.
-
-Формат простой: одна строка — один JSON-объект. Пустые строки и строки,
-начинающиеся с ``#``, пропускаются, поэтому в файле можно оставлять заметки.
-
-Пример строки::
-
-    {"question": "Кто такой Танк?", "character_id": 5,
-     "reference_answer": "Мутировавший выживший...", "expected_sources": ["Танк"]}
-"""
-
 from __future__ import annotations
 
 import json
@@ -21,7 +10,7 @@ from app.exceptions import EvaluationError
 
 
 def load_cases(path: Path) -> list[EvalCase]:
-    """Прочитать датасет целиком."""
+    """Прочитать датасет целиком"""
     if not path.exists():
         raise EvaluationError(f"Dataset not found: {path}")
 
@@ -46,7 +35,7 @@ def load_cases(path: Path) -> list[EvalCase]:
 
 
 def build_case(record: Mapping[str, Any], *, where: str) -> EvalCase:
-    """Собрать кейс из записи, внятно объяснив, что именно не так."""
+    """Собрать кейс из записи, внятно объяснив, что именно не так"""
     question = str(record.get("question", "")).strip()
     if not question:
         raise EvaluationError(f"{where}: 'question' must not be empty")
@@ -65,7 +54,7 @@ def build_case(record: Mapping[str, Any], *, where: str) -> EvalCase:
 
 
 def _as_text_tuple(value: object, where: str, field: str) -> tuple[str, ...]:
-    """Превратить необязательный список строк в кортеж строк."""
+    """Превратить необязательный список строк в кортеж строк"""
     if value is None:
         return ()
     if isinstance(value, str) or not isinstance(value, Iterable):

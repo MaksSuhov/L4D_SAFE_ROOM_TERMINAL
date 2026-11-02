@@ -1,15 +1,17 @@
-"""Parsers turning one wiki page into corpus records.
+"""Парсеры, превращающие одну страницу вики в записи корпуса.
 
-Each parser owns the layout of one :class:`~app.ingestion.sources.ParserKind`
-and produces :class:`~app.schemas.LoreChunkCreate` records — flat, self-contained
-text with enough provenance to be shown to a player. Splitting is deliberate:
+Каждый парсер отвечает за структуру одного
+:class:`~app.ingestion.sources.ParserKind` и порождает записи
+:class:`~app.schemas.LoreChunkCreate` — плоский самодостаточный текст с
+достаточными сведениями о происхождении, чтобы показать его игроку. Разбиение
+намеренное:
 
-* graffiti becomes one record per place, because the walls hold conversations and a reply is
-  meaningless without the inscription it answers;
-* articles become one record per paragraph group of a section, so a retrieved
-  chunk is small enough to fit several of them into the prompt;
-* quotes and subtitles become one record per situation of one character, which is
-  the unit a voice sample is useful in.
+* граффити становятся одной записью на место, потому что стены ведут беседу,
+  а ответ бессмыслен без надписи, на которую отвечает;
+* статьи становятся одной записью на группу абзацев раздела, чтобы найденный
+  фрагмент был мал и несколько таких укладывались в промпт;
+* цитаты и субтитры становятся одной записью на ситуацию одного персонажа —
+  именно в таком объёме голосовой образец полезен.
 """
 
 from __future__ import annotations
@@ -23,71 +25,71 @@ from app.ingestion.wikitext import ListItem, Section, WikitextCleaner
 from app.schemas import LoreChunkCreate
 
 ARTICLE_MAX_CHARS = 900
-"""Upper bound of an official record; roughly one dense paragraph."""
+"""Верхняя граница официальной записи; примерно один плотный абзац."""
 
 ARTICLE_MIN_CHARS = 120
-"""Shorter sections are merged into the neighbouring record instead of standing alone."""
+"""Более короткие разделы присоединяются к соседней записи, а не стоят отдельно."""
 
 GRAFFITI_MAX_CHARS = 800
-"""A conversation on a wall is kept together, but only up to this length."""
+"""Беседа на стене хранится целиком, но только до этой длины."""
 
 VOICE_MAX_LINES_PER_SECTION = 25
-"""How many lines of one situation are kept as a voice sample."""
+"""Сколько строк одной ситуации сохраняется как голосовой образец."""
 
 VOICE_MAX_LINES_PER_CHARACTER = 400
-"""Budget for the whole voice profile of one character.
+"""Лимит на весь голосовой профиль одного персонажа.
 
-The dumps hold thousands of lines, most of them one-word reactions; the budget
-keeps the wordy ones, which are what a manner of speech is actually made of.
+В дампах тысячи строк, большинство — однословные реакции; лимит сохраняет
+многословные, из которых и складывается манера речи.
 """
 
 VOICE_MIN_LINES_PER_SECTION = 2
-"""A single line is not a situation; it is dropped as noise."""
+"""Одна строка — это не ситуация; она отбрасывается как шум."""
 
 VOICE_MIN_CHARS = 15
 VOICE_MIN_WORDS = 3
-"""Filters for the shouty one-liners ("Ugh!", "Watch out!") that carry no style."""
+"""Фильтры для крикливых однострочников («Ух!», «Осторожно!»), не несущих стиля."""
 
 LEAD_SECTION_TITLE = "Обзор"
-"""Name given to the unheaded introduction of an article.
+"""Название, даваемое введению статьи без заголовка.
 
-The corpus is read from the Russian wiki, so the synthetic section title is
-Russian too — it ends up in the provenance shown next to a source.
+Корпус читается из русской вики, поэтому синтетический заголовок раздела тоже
+русский — он попадает в происхождение, показываемое рядом с источником.
 """
 
 STAGE_DIRECTION_PATTERN = re.compile(r"^[\[(].*[\])]$")
-"""A situation note such as "[When the other survivors are in the safe room]"."""
+"""Пометка о ситуации, например «[Когда остальные выжившие в убежище]»."""
 
 VERSION_NOTE_PATTERN = re.compile(r"\s*\([^)]*\bversions?\b[^)]*\)\s*$", re.IGNORECASE)
-"""Wiki bookkeeping such as "(2 versions)" or "(2 versions, and on Intro)"."""
+"""Вики-служебные пометки вроде «(2 versions)» или «(2 versions, and on Intro)»."""
 
 TABLE_ROW_PATTERN = re.compile(r"\n[ \t]*\|-")
-"""Rows of a wiki table; each ``|-`` opens a new one.
+"""Строки вики-таблицы; каждая ``|-`` открывает новую.
 
-The Russian wiki indents its table furniture, so the leading whitespace is part
-of the pattern rather than something the caller strips.
+Русская вики делает отступ у разметки таблиц, поэтому ведущие пробелы — часть
+шаблона, а не то, что срезает вызывающий код.
 """
 
 TABLE_CELL_PATTERN = re.compile(r"\n[ \t]*\|(?![}-])")
-"""Cells inside a row; ``|-`` and ``|}`` are furniture, not cells."""
+"""Ячейки внутри строки; ``|-`` и ``|}`` — служебная разметка, а не ячейки."""
 
 SUBTITLE_SPAN_PATTERN = re.compile(r"<span\b[^>]*>(.*?)</span>", re.DOTALL | re.IGNORECASE)
-"""The ``<span style="color:…">`` wrapper the wiki puts around every subtitle."""
+"""Обёртка ``<span style="color:…">``, которой вики окружает каждый субтитр."""
 
 SUBTITLE_GROUP_PATTERN = re.compile(r'table-group-name"?[^\n]*\|\s*(?P<label>[^\n|]+)')
-"""The internal cue name grouping the lines of one situation."""
+"""Внутреннее имя метки, группирующее строки одной ситуации."""
 
 SUBTITLE_ENGLISH_MARKER = "[english]"
-"""Marks the English half of a bilingual subtitle row, which is dropped."""
+"""Помечает английскую половину двуязычной строки субтитров, которая отбрасывается."""
 
 SPEAKER_PREFIX_PATTERN = re.compile(r"^[^\s:][^:]{0,30}:\s+")
-"""The ``Эллис: `` prefix naming the speaker, redundant on a per-character page."""
+"""Префикс ``Эллис: ``, называющий говорящего; избыточен на странице одного персонажа."""
 
 INSCRIPTION_PLACE_PREFIX = "! colspan"
-"""Opens the row naming the place the inscriptions below were found in."""
+"""Открывает строку с названием места, где найдены надписи ниже."""
 
 GAME_SECTION_TITLES = frozenset({"Left 4 Dead", "Left 4 Dead 2"})
-"""Top level of the graffiti page; the game name adds nothing to a location."""
+"""Верхний уровень страницы граффити; название игры ничего не добавляет к локации."""
 
 SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?])\s+")
 QUOTE_WRAPPER_PATTERN = re.compile(r'^["“”\'«»\s]+|["“”\'«»\s]+$')
@@ -95,7 +97,7 @@ EMPTY_NOISE_PATTERN = re.compile(r"^[.\s…·,;:!?()-]+$")
 
 
 class CorpusParser(Protocol):
-    """Turns the markup of one page into corpus records."""
+    """Превращает разметку одной страницы в записи корпуса."""
 
     def parse(
         self,
@@ -104,16 +106,16 @@ class CorpusParser(Protocol):
         *,
         source_url: str,
     ) -> list[LoreChunkCreate]:
-        """Return the records extracted from ``wikitext``."""
+        """Вернуть записи, извлечённые из ``wikitext``."""
         ...
 
 
 def split_into_chunks(text: str, *, max_chars: int) -> list[str]:
-    """Split ``text`` on paragraph boundaries, then on sentences, under ``max_chars``.
+    """Разбить ``text`` по границам абзацев, затем по предложениям, в пределах ``max_chars``.
 
-    Paragraph boundaries are preferred because they keep a fact together with
-    its explanation; sentences are only used to break up a single paragraph that
-    is still too long.
+    Границы абзацев предпочтительнее: они сохраняют факт вместе с его пояснением;
+    предложения используются лишь чтобы разбить один абзац, который всё ещё
+    слишком длинный.
     """
     chunks: list[str] = []
     current = ""
@@ -133,7 +135,7 @@ def split_into_chunks(text: str, *, max_chars: int) -> list[str]:
 
 
 def _break_long_chunk(chunk: str, max_chars: int) -> list[str]:
-    """Break a chunk that exceeds ``max_chars`` at sentence, then word, boundaries."""
+    """Разбить фрагмент, превышающий ``max_chars``, по предложениям, затем по словам."""
     if len(chunk) <= max_chars:
         return [chunk]
 
@@ -157,7 +159,7 @@ def _break_long_chunk(chunk: str, max_chars: int) -> list[str]:
 
 
 def _break_long_chunk_by_words(sentence: str, max_chars: int) -> list[str]:
-    """Last resort: split a single over-long sentence into word windows."""
+    """Крайний случай: разбить одно слишком длинное предложение на окна по словам."""
     pieces: list[str] = []
     current = ""
     for word in sentence.split():
@@ -174,17 +176,17 @@ def _break_long_chunk_by_words(sentence: str, max_chars: int) -> list[str]:
 
 
 class GraffitiParser(CorpusParser):
-    """Reads the wall inscriptions of the safe rooms.
+    """Читает настенные надписи убежищ.
 
-    The Russian wiki lays every chapter out as a two-column table — the original
-    English inscription the developers painted, and its Russian translation, one
-    place per ``colspan`` header — so a record is one place's walls, titled
-    ``Campaign › Place`` and holding the translations. Only the Russian column is
-    kept: those walls are read aloud to a player who speaks Russian.
+    Русская вики раскладывает каждую главу в таблицу из двух колонок — оригинальная
+    английская надпись, которую нарисовали разработчики, и её русский перевод, по
+    одному месту на заголовок ``colspan`` — поэтому запись — это стены одного
+    места с заголовком ``Campaign › Place``, содержащие переводы. Сохраняется
+    только русская колонка: эти стены читаются вслух игроку, говорящему по-русски.
 
-    The bulleted layout of the English wiki is still handled, because the prose
-    sections of the same page (the trivia notes) use it, and because a page that
-    keeps the older layout must not silently vanish from the corpus.
+    Разметка списком из английской вики тоже обрабатывается, потому что её
+    используют прозаические разделы той же страницы (заметки), и потому что
+    страница со старым оформлением не должна молча исчезнуть из корпуса.
     """
 
     def __init__(self, cleaner: WikitextCleaner) -> None:
@@ -231,7 +233,7 @@ class GraffitiParser(CorpusParser):
         location: str,
         source_url: str,
     ) -> list[LoreChunkCreate]:
-        """Fall back to the bulleted layout of the English wiki."""
+        """Запасной путь — разметка списком из английской вики."""
         items = self._cleaner.list_items(section.body)
         preamble = self._preamble(section, items)
 
@@ -249,11 +251,11 @@ class GraffitiParser(CorpusParser):
         ]
 
     def _inscription_groups(self, body: str) -> list[tuple[str, list[str]]]:
-        """Split a chapter table into ``(place, translated inscriptions)`` blocks.
+        """Разбить таблицу главы на блоки ``(place, translated inscriptions)``.
 
-        A row is two cells — the original and the translation — and only the
-        second is kept, so a row that lost its translation is dropped rather
-        than answered in English.
+        Строка — это две ячейки, оригинал и перевод, и сохраняется только вторая,
+        поэтому строка, потерявшая перевод, отбрасывается, а не отвечается
+        на английском.
         """
         groups: list[tuple[str, list[str]]] = []
         place = ""
@@ -288,11 +290,11 @@ class GraffitiParser(CorpusParser):
         return groups
 
     def _preamble(self, section: Section, items: Sequence[ListItem]) -> str:
-        """Return the prose that introduces the inscriptions of a chapter.
+        """Вернуть прозу, вводящую надписи главы.
 
-        The page occasionally notes where the writings actually are ("these
-        writings can be found in a normal room, not a safe room"), which is
-        worth keeping as its own record.
+        Страница иногда отмечает, где на самом деле находятся надписи («эти
+        надписи можно найти в обычной комнате, а не в убежище»), а это стоит
+        сохранить отдельной записью.
         """
         body = self._cleaner.clean(section.body)
         marker_line = body.find("*")
@@ -302,7 +304,7 @@ class GraffitiParser(CorpusParser):
 
 
 def _threads(items: Sequence[ListItem]) -> list[str]:
-    """Group list items into threads, indenting every reply under its root."""
+    """Сгруппировать элементы списка в ветки, с отступом каждого ответа под его корнем."""
     threads: list[list[str]] = []
     for item in items:
         if item.depth <= 1 or not threads:
@@ -313,36 +315,37 @@ def _threads(items: Sequence[ListItem]) -> list[str]:
 
 
 def _graffiti_location(section: Section) -> str:
-    """Return ``Campaign › Chapter`` for a graffiti section.
+    """Вернуть ``Campaign › Chapter`` для раздела граффити.
 
-    The page nests every section under the game it belongs to, and a player
-    reading the terminal already knows which game they are playing, so the
-    outermost level is dropped from the provenance.
+    Страница вкладывает каждый раздел в игру, к которой он относится, а игрок,
+    читающий терминал, уже знает, в какую игру играет, поэтому самый внешний
+    уровень отбрасывается из происхождения.
     """
     path = section.path if section.path[0] not in GAME_SECTION_TITLES else section.path[1:]
     return " › ".join(path) or section.title
 
 
 def _place_name(cleaner: WikitextCleaner, header_line: str) -> str:
-    """Return the place named by a ``! colspan`` table header.
+    """Вернуть место, названное заголовком таблицы ``! colspan``.
 
-    The header reads ``! colspan="2" | <center>«[[Апартаменты]]»</center>``, so
-    the label is whatever follows the pipe once the markup is cleaned.
+    Заголовок выглядит как ``! colspan="2" | <center>«[[Апартаменты]]»</center>``,
+    поэтому подписью служит всё, что идёт после вертикальной черты, когда
+    разметка очищена.
     """
     _, _, label = header_line.partition("|")
     return _strip_guillemets(cleaner.clean(label))
 
 
 def _strip_guillemets(text: str) -> str:
-    """Trim the « » the Russian wiki wraps campaign and place names in."""
+    """Срезать « », в которые русская вики оборачивает названия кампаний и мест."""
     return text.strip().strip("«»").strip()
 
 
 def _pack_lines(lines: Sequence[str], *, max_chars: int) -> list[str]:
-    """Group lines into pieces that stay under ``max_chars``.
+    """Сгруппировать строки в куски, укладывающиеся в ``max_chars``.
 
-    Wall conversations can run long; splitting them on line boundaries keeps
-    every inscription whole, which truncating mid-sentence would not.
+    Настенные беседы бывают длинными; разбиение по границам строк сохраняет
+    каждую надпись целой, чего обрезание на середине предложения не даёт.
     """
     pieces: list[str] = []
     current: list[str] = []
@@ -359,7 +362,7 @@ def _pack_lines(lines: Sequence[str], *, max_chars: int) -> list[str]:
 
 
 class ArticleParser(CorpusParser):
-    """Reads an encyclopaedia page, split by heading and paragraph."""
+    """Читает энциклопедическую страницу, разбитую по заголовкам и абзацам."""
 
     def __init__(self, cleaner: WikitextCleaner) -> None:
         self._cleaner = cleaner
@@ -380,7 +383,7 @@ class ArticleParser(CorpusParser):
         return records
 
     def _sections(self, wikitext: str) -> tuple[Section, list[Section]]:
-        """Return the lead of the page and its headed sections."""
+        """Вернуть введение страницы и её разделы с заголовками."""
         lead = self._cleaner.lead(wikitext)
         overview = Section(
             level=1,
@@ -415,13 +418,13 @@ class ArticleParser(CorpusParser):
 
 
 class QuotesParser(CorpusParser):
-    """Reads the dialogue dump of one character into voice samples.
+    """Читает дамп диалогов одного персонажа в голосовые образцы.
 
-    A dump holds thousands of lines, most of them one-word reactions that say
-    nothing about a personality. The parser keeps the lines that carry a voice —
-    long enough to show sentence rhythm, wording and pet subjects — groups them
-    by the situation the game recorded them for, and bounds how much of each
-    character is stored.
+    В дампе тысячи строк, большинство — однословные реакции, ничего не говорящие
+    о личности. Парсер сохраняет строки, несущие голос, — достаточно длинные,
+    чтобы показать ритм фраз, формулировки и любимые темы, — группирует их по
+    ситуации, для которой игра их записала, и ограничивает, сколько хранится от
+    каждого персонажа.
     """
 
     def __init__(self, cleaner: WikitextCleaner) -> None:
@@ -460,40 +463,40 @@ class QuotesParser(CorpusParser):
         return records
 
     def _lines(self, section: Section) -> list[str]:
-        """Return the usable dialogue lines of one situation, in page order."""
+        """Вернуть пригодные строки диалога одной ситуации в порядке страницы."""
         candidates = [item.text for item in self._cleaner.list_items(section.body)]
         return [line for line in map(self._tidy_line, candidates) if self._is_voice(line)]
 
     @staticmethod
     def _tidy_line(text: str) -> str:
-        """Drop the quoting and the wiki bookkeeping around a recorded line."""
+        """Убрать кавычки и вики-служебные пометки вокруг записанной строки."""
         without_version_note = VERSION_NOTE_PATTERN.sub("", text)
         return QUOTE_WRAPPER_PATTERN.sub("", without_version_note).strip()
 
     @staticmethod
     def _is_voice(line: str) -> bool:
-        """Whether a line is long and wordy enough to show how the character talks."""
+        """Достаточно ли строка длинна и многословна, чтобы показать манеру речи персонажа."""
         return _is_voice_line(line)
 
 
 class SubtitlesParser(CorpusParser):
-    """Reads a bilingual subtitle table into voice samples.
+    """Читает двуязычную таблицу субтитров в голосовые образцы.
 
-    The Russian wiki stores a character's dialogue as one table per game, and
-    every recorded line appears twice: the Russian column first, the English
-    original second, both wrapped in a coloured ``<span>``. Only the Russian
-    half is kept — it is the language the terminal answers in — and the cue name
-    of each block doubles as the situation the lines were recorded for.
+    Русская вики хранит диалоги персонажа как одну таблицу на игру, и каждая
+    записанная строка появляется дважды: сначала русская колонка, потом английский
+    оригинал, обе обёрнуты в цветной ``<span>``. Сохраняется только русская
+    половина — это язык, на котором отвечает терминал, — а имя метки каждого блока
+    служит ситуацией, для которой строки были записаны.
 
-    This is a separate layout from :class:`QuotesParser` because the Russian
-    wiki has no curated quote pages: its dumps are raw subtitle tables, where
-    the English wiki kept tidy lists.
+    Это отдельная разметка от :class:`QuotesParser`, потому что на русской вики
+    нет отобранных страниц цитат: её дампы — сырые таблицы субтитров, тогда как
+    английская вики держала аккуратные списки.
 
-    Unlike :class:`QuotesParser` this parser applies no budget to the whole
-    character. That budget existed because a raw dump is mostly one-word barks;
-    here the word-count filter and the deduplication have already removed them,
-    and capping the result would only cut the character's later lines — the
-    finale and campaign-specific dialogue — for no gain.
+    В отличие от :class:`QuotesParser` этот парсер не применяет лимит ко всему
+    персонажу. Тот лимит существовал, потому что сырой дамп — это в основном
+    однословные выкрики; здесь фильтр по словам и дедупликация уже убрали их, а
+    ограничение результата лишь отрезало бы более поздние строки персонажа —
+    финал и диалоги конкретных кампаний — без всякой пользы.
     """
 
     def __init__(self, cleaner: WikitextCleaner) -> None:
@@ -531,12 +534,12 @@ class SubtitlesParser(CorpusParser):
         return records
 
     def _groups(self, wikitext: str) -> list[tuple[str, list[str]]]:
-        """Split the table into ``(cue name, recorded lines)`` blocks.
+        """Разбить таблицу на блоки ``(cue name, recorded lines)``.
 
-        The table interleaves three things: cue names marking a situation, the
-        Russian cell of every line, and the English cell of the same line. The
-        English cells are recognised by their ``[english]`` marker and dropped,
-        and the cue names become the block boundaries.
+        Таблица чередует три вещи: имена меток, отмечающие ситуацию, русскую ячейку
+        каждой строки и английскую ячейку той же строки. Английские ячейки узнаются
+        по маркеру ``[english]`` и отбрасываются, а имена меток становятся границами
+        блоков.
         """
         groups: list[tuple[str, list[str]]] = []
         label = ""
@@ -558,17 +561,17 @@ class SubtitlesParser(CorpusParser):
         return groups
 
     def _tidy_line(self, span: str) -> str:
-        """Drop the markup, the speaker and the quoting around one subtitle."""
+        """Убрать разметку, говорящего и кавычки вокруг одного субтитра."""
         cleaned = self._cleaner.clean(span)
         without_speaker = SPEAKER_PREFIX_PATTERN.sub("", cleaned)
         return QUOTE_WRAPPER_PATTERN.sub("", without_speaker).strip()
 
 
 def _is_voice_line(line: str) -> bool:
-    """Whether a line is long and wordy enough to show how the character talks.
+    """Достаточно ли строка длинна и многословна, чтобы показать манеру речи персонажа.
 
-    A dump is mostly one-word reactions — "Клоуны!" says nothing about a voice —
-    so the threshold is on words, not on the line simply being non-empty.
+    Дамп — это в основном однословные реакции — «Клоуны!» ничего не говорит о
+    голосе, — поэтому порог по словам, а не по тому, что строка просто непустая.
     """
     if STAGE_DIRECTION_PATTERN.match(line):
         return False
@@ -578,10 +581,10 @@ def _is_voice_line(line: str) -> bool:
 
 
 def _unique(lines: Iterable[str]) -> list[str]:
-    """Drop repeats, keeping the first occurrence.
+    """Убрать повторы, сохраняя первое вхождение.
 
-    A cue name usually holds several takes of the same line, and the same text
-    three times in a row teaches the model nothing about the voice.
+    Имя метки обычно содержит несколько дублей одной строки, а один и тот же
+    текст три раза подряд ничему не учит модель о голосе.
     """
     seen: set[str] = set()
     unique: list[str] = []

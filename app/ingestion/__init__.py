@@ -1,20 +1,19 @@
-"""Corpus-acquisition stage: the Left 4 Dead Fandom wiki as a lore archive.
+"""Этап загрузки корпуса: вики Left 4 Dead на Fandom как архив лора.
 
-The package is an infrastructure adapter. It reads somebody else's wiki, turns
-it into flat, self-contained records tagged with how much they can be trusted,
-and hands them to the service layer — which embeds and stores them without ever
-knowing where they came from.
+Пакет — инфраструктурный адаптер. Он читает чужую вики, превращает её в
+плоские самодостаточные записи с пометкой о степени доверия и передаёт их
+слою сервисов — тот их индексирует и хранит, не зная, откуда они взялись.
 
-The pipeline is four steps, each replaceable on its own:
+Конвейер состоит из четырёх шагов, каждый заменяется отдельно:
 
 ``wiki_client``
-    Fetches raw markup, with a disk cache and polite retries.
+    Забирает сырую разметку, с дисковым кэшем и вежливыми повторами.
 ``wikitext``
-    Cleans MediaWiki markup down to readable plain text.
+    Чистит разметку MediaWiki до читаемого простого текста.
 ``parsers``
-    Splits a page into records according to its layout.
+    Разбивает страницу на записи по её структуре.
 ``translation``
-    Optional: normalises the corpus into the language the terminal answers in.
+    Необязательный: приводит корпус к языку, на котором отвечает терминал.
 """
 
 from app.ingestion.parsers import (

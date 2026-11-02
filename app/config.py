@@ -1,9 +1,9 @@
-"""Strongly typed application configuration.
+"""Строго типизированная конфигурация приложения.
 
-Every tunable value of the service lives here and is loaded from environment
-variables (or a local ``.env`` file). The rest of the code depends on the
-:class:`Settings` object instead of reading ``os.environ`` directly, which keeps
-the configuration layer the single source of truth.
+Здесь живут все настраиваемые параметры сервиса; они загружаются из переменных
+окружения (или из локального файла ``.env``). Остальной код зависит от объекта
+:class:`Settings`, а не читает ``os.environ`` напрямую, — так слой конфигурации
+остаётся единственным источником правды.
 """
 
 from __future__ import annotations
@@ -16,11 +16,11 @@ from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 DEFAULT_EMBEDDING_DIMENSIONS: Final[int] = 1536
-"""Dimension of ``text-embedding-3-small`` vectors, also used by the pgvector column."""
+"""Размерность векторов ``text-embedding-3-small``; используется и столбцом pgvector."""
 
 
 class Settings(BaseSettings):
-    """Runtime configuration of the Safe-Room Terminal."""
+    """Конфигурация Safe-Room Terminal во время выполнения."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -36,27 +36,27 @@ class Settings(BaseSettings):
     debug: bool = False
     api_prefix: str = Field(
         default="/api/v1",
-        description="Prefix for every route; set to an empty string to serve routes from the root.",
+        description="Префикс всех маршрутов; пустая строка — отдавать маршруты от корня.",
     )
     cors_allow_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"],
         description=(
-            "Browser origins allowed to call the API. The default covers the Vite dev "
-            "server of the bundled frontend; pass a comma-separated list to override."
+            "Origin браузеров, которым разрешено обращаться к API. По умолчанию покрыт "
+            "dev-сервер Vite из комплектного фронтенда; перебивается списком через запятую."
         ),
     )
 
     # --- Database --------------------------------------------------------
     database_url: str = Field(
         default="postgresql+asyncpg://l4d:l4d@localhost:5432/l4d_terminal",
-        description="Async SQLAlchemy DSN. The target database must have the pgvector extension.",
+        description="Асинхронный DSN SQLAlchemy. В целевой базе нужно расширение pgvector.",
     )
     database_echo: bool = False
     database_pool_size: int = 5
     database_max_overflow: int = 10
     auto_create_tables: bool = Field(
         default=False,
-        description="Create the schema on application start-up instead of running seed.py.",
+        description="Создавать схему при старте приложения вместо запуска seed.py.",
     )
 
     # --- AI provider ------------------------------------------------------
@@ -72,7 +72,7 @@ class Settings(BaseSettings):
     ai_base_url: str | None = Field(
         default=None,
         validation_alias=AliasChoices("AI_BASE_URL", "OPENAI_BASE_URL", "ROUTERAI_BASE_URL"),
-        description="Endpoint of the OpenAI-compatible gateway; unset targets OpenAI itself.",
+        description="Адрес OpenAI-совместимого шлюза; если не задан, запрос идёт в сам OpenAI.",
     )
     ai_timeout_seconds: float = Field(
         default=30.0,
@@ -81,8 +81,8 @@ class Settings(BaseSettings):
     embedding_model: str = Field(
         default="text-embedding-3-small",
         description=(
-            "Provider-specific model id. Aggregators such as RouterAI require the "
-            "vendor prefix, e.g. openai/text-embedding-3-small."
+            "Идентификатор модели у конкретного провайдера. Агрегаторы вроде RouterAI "
+            "требуют префикс вендора, например openai/text-embedding-3-small."
         ),
     )
     embedding_dimensions: int = DEFAULT_EMBEDDING_DIMENSIONS
@@ -101,8 +101,8 @@ class Settings(BaseSettings):
             "Весь диалог, включая каждую реплику, веди на русском."
         ),
         description=(
-            "Instruction appended to every persona prompt to pin the language of "
-            "the answers and of the whole dialogue."
+            "Инструкция, дописываемая к промпту каждого образа, чтобы закрепить язык "
+            "ответов и всего диалога."
         ),
     )
 
@@ -114,37 +114,37 @@ class Settings(BaseSettings):
     wiki_request_timeout_seconds: float = Field(default=30.0, gt=0.0)
     wiki_user_agent: str = Field(
         default="L4D-SafeRoom-Terminal/0.1 (portfolio project; lore ingestion)",
-        description="Sent with every wiki request; the Fandom API rejects anonymous clients.",
+        description="Отправляется с каждым запросом к вики: API Fandom не пускает анонимов.",
     )
     wiki_cache_dir: Path = Field(
         default=Path("data/wiki_cache"),
-        description="Raw wikitext kept between runs so a re-parse needs no network.",
+        description="Сырой викитекст, сохраняемый между запусками: повторный разбор без сети.",
     )
     wiki_cache_enabled: bool = True
     corpus_path: Path = Field(
         default=Path("data/corpus/lore.jsonl"),
-        description="Normalised corpus snapshot ingested into the vector store.",
+        description="Снимок нормализованного корпуса, загружаемый в векторное хранилище.",
     )
     ingestion_batch_size: int = Field(
         default=64,
         ge=1,
         le=2048,
-        description="Texts per embedding request during ingestion.",
+        description="Сколько текстов уходит в один запрос на эмбеддинги при индексации.",
     )
     translation_batch_size: int = Field(
         default=16,
         ge=1,
         le=128,
-        description="Texts per translation request when normalising the corpus language.",
+        description="Сколько текстов уходит в один запрос на перевод при нормализации языка.",
     )
     corpus_language: str = Field(
         default="ru",
         min_length=2,
         max_length=8,
         description=(
-            "Language the corpus is normalised into during ingestion. Keeping it in the "
-            "same language as the answers makes retrieval monolingual, which measurably "
-            "raises similarity scores compared with cross-language search."
+            "Язык, в который нормализуется корпус при индексации. Совпадение с языком "
+            "ответов делает поиск одноязычным, а это измеримо поднимает близость по "
+            "сравнению с кросс-язычным поиском."
         ),
     )
 
@@ -160,10 +160,10 @@ class Settings(BaseSettings):
         ge=-1.0,
         le=1.0,
         description=(
-            "Cosine similarity floor for the evidence tiers (lore and graffiti); "
-            "weaker matches are dropped instead of being passed to the model. "
-            "Slightly above the noise level of text-embedding-3-small, where "
-            "unrelated texts rarely pass 0.2."
+            "Порог косинусной близости для уровней-доказательств (лор и надписи): "
+            "более слабые совпадения отбрасываются и не попадают в модель. Чуть выше "
+            "уровня шума text-embedding-3-small, где несвязанные тексты редко "
+            "проходят 0.2."
         ),
     )
     rag_voice_min_similarity: float = Field(
@@ -180,29 +180,29 @@ class Settings(BaseSettings):
     @field_validator("api_prefix")
     @classmethod
     def _normalise_api_prefix(cls, value: str) -> str:
-        """Accept ``api/v1``, ``/api/v1`` and ``/api/v1/`` and store ``/api/v1``."""
+        """Привести ``api/v1``, ``/api/v1`` и ``/api/v1/`` к виду ``/api/v1``."""
         stripped = value.strip().strip("/")
         return f"/{stripped}" if stripped else ""
 
     @field_validator("cors_allow_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:
-        """Accept ``a,b``, ``a, b`` or a JSON list and normalise it to a list."""
+        """Принять ``a,b``, ``a, b`` или JSON-список и привести к списку."""
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
 
     @property
     def is_ai_configured(self) -> bool:
-        """Whether an API key is present, checked before the client is built."""
+        """Есть ли API-ключ; проверяется до создания клиента."""
         return bool(self.ai_api_key.strip())
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Return the process-wide settings instance.
+    """Вернуть экземпляр настроек, общий для всего процесса.
 
-    The value is cached because ``Settings`` parses the environment on every
-    instantiation; tests clear the cache with ``get_settings.cache_clear()``.
+    Значение кэшируется, потому что ``Settings`` разбирает окружение при каждом
+    создании; тесты сбрасывают кэш через ``get_settings.cache_clear()``.
     """
     return Settings()

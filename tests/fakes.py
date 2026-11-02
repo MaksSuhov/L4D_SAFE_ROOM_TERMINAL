@@ -1,7 +1,7 @@
-"""In-memory doubles implementing the application ports.
+"""Двойники в памяти, реализующие порты приложения.
 
-They prove the Dependency Inversion Principle in practice: the RAG pipeline runs
-against these fakes without PostgreSQL, pgvector or network access.
+Они доказывают принцип инверсии зависимостей на практике: конвейер RAG
+работает на этих заглушках без PostgreSQL, pgvector и доступа к сети.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from app.schemas import EmbeddedLoreChunk, LoreChunkCreate
 from app.taxonomy import LoreTopic, SourceType
 
 EMBEDDING_SIZE = 4
-"""The fakes do not care about the real width of an embedding vector."""
+"""Заглушкам не важна настоящая ширина вектора эмбеддинга."""
 
 
 def build_character(
@@ -24,7 +24,7 @@ def build_character(
     system_prompt: str = "Ты — Эллис.",
     few_shot_examples: list[dict[str, str]] | None = None,
 ) -> Character:
-    """Create a detached ORM character, no session required."""
+    """Создать отсоединённую ORM-сущность персонажа, сессия не нужна."""
     return Character(
         id=character_id,
         name=name,
@@ -42,7 +42,7 @@ def build_chunk(
     title: str = "Archive",
     character_name: str | None = None,
 ) -> LoreChunk:
-    """Create a detached ORM lore chunk with a dummy embedding."""
+    """Создать отсоединённый фрагмент лора с фиктивным эмбеддингом."""
     return LoreChunk(
         id=chunk_id,
         content=content,
@@ -64,7 +64,7 @@ def build_document(
     title: str = "Archive",
     character_name: str | None = None,
 ) -> LoreChunkCreate:
-    """Create a corpus record waiting to be ingested."""
+    """Создать запись корпуса, ожидающую загрузки."""
     return LoreChunkCreate(
         content=content,
         source_type=source_type,
@@ -75,7 +75,7 @@ def build_document(
 
 
 class InMemoryCharacterRepository:
-    """Dictionary-backed implementation of :class:`CharacterRepositoryProtocol`."""
+    """Реализация :class:`CharacterRepositoryProtocol` на словаре."""
 
     def __init__(self, characters: Sequence[Character] | None = None) -> None:
         self._characters: dict[int, Character] = {
@@ -90,11 +90,11 @@ class InMemoryCharacterRepository:
 
 
 class InMemoryLoreChunkRepository:
-    """Serves a canned, ordered list of matches and records every search.
+    """Отдаёт заранее заданный упорядоченный список совпадений и записывает каждый поиск.
 
-    The canned list stands in for the vector index: the real repository returns
-    its matches ordered by cosine distance, and this double does the same, which
-    is what lets the tier tests assert on budgets and filters without a database.
+    Заданный список заменяет векторный индекс: настоящий репозиторий возвращает
+    совпадения, упорядоченные по косинусной дистанции, и этот двойник делает так же,
+    что и позволяет тестам уровней проверять бюджеты и фильтры без базы.
     """
 
     def __init__(self, matches: Sequence[RetrievedChunk] | None = None) -> None:
@@ -174,7 +174,7 @@ class InMemoryLoreChunkRepository:
 
 
 class FakeAIClient:
-    """Deterministic stand-in for :class:`~app.services.ai_service.OpenAIClient`."""
+    """Детерминированная заглушка для :class:`~app.services.ai_service.OpenAIClient`."""
 
     model_name = "fake-model"
 
@@ -262,11 +262,11 @@ class FakeAIClient:
 
 
 class FakeClock:
-    """Clock that advances by a fixed step on every reading.
+    """Часы, прибавляющие фиксированный шаг при каждом чтении.
 
-    It lets the latency tests assert on exact numbers without sleeping: with a
-    step of one second, a reading taken at the start, on the first token and at
-    the end reports a one-second wait to the first token and two seconds total.
+    Они позволяют тестам замеров проверять точные числа без ожидания: при шаге в
+    одну секунду замеры в начале, на первом токене и в конце дают одну секунду
+    ожидания первого токена и две секунды всего.
     """
 
     def __init__(self, *, start: float = 0.0, step: float = 0.0) -> None:

@@ -8,21 +8,21 @@ from app.schemas import EmbeddedLoreChunk, IngestionReport, LoreChunkCreate
 
 
 def content_hash(content: str) -> str:
-    """Return the deduplication hash of a record.
+    """Вернуть хеш записи для дедупликации.
 
-    The text is normalised before hashing so that a re-fetch of the wiki which
-    only changes whitespace does not look like new content.
+    Текст нормализуется до хеширования, чтобы повторная выгрузка вики, где
+    изменились только пробелы, не выглядела новым содержимым.
     """
     normalised = " ".join(content.split())
     return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
 
 
 class LoreIngestionService:
-    """Turns corpus records into embedded :class:`~app.models.LoreChunk` rows.
+    """Превращает записи корпуса в строки :class:`~app.models.LoreChunk` с эмбеддингами.
 
-    The service is idempotent: every record carries a hash of its text and
-    records whose hash is already stored are skipped, so re-running the seeder
-    neither duplicates rows nor pays for their embeddings again.
+    Сервис идемпотентен: каждая запись несёт хеш своего текста, а записи, чей
+    хеш уже сохранён, пропускаются, так что повторный запуск seed-скрипта не
+    дублирует строки и не платит за их эмбеддинги снова.
     """
 
     def __init__(
@@ -34,7 +34,7 @@ class LoreIngestionService:
         self._ai_client = ai_client
 
     async def ingest(self, items: Sequence[LoreChunkCreate]) -> IngestionReport:
-        """Embed and store the records of ``items`` that are not stored yet."""
+        """Получить эмбеддинги и сохранить те записи из ``items``, которых ещё нет."""
         if not items:
             return IngestionReport()
 
@@ -60,7 +60,7 @@ class LoreIngestionService:
         )
 
     async def _select_pending(self, items: Sequence[LoreChunkCreate]) -> list[LoreChunkCreate]:
-        """Drop the records the store already holds, and duplicates within the batch."""
+        """Отбросить записи, уже имеющиеся в хранилище, и дубликаты внутри пакета."""
         candidates: dict[str, LoreChunkCreate] = {}
         for item in items:
             candidates.setdefault(content_hash(item.content), item)
@@ -70,7 +70,7 @@ class LoreIngestionService:
 
     @staticmethod
     def _count_by_source_type(records: Sequence[EmbeddedLoreChunk]) -> dict[str, int]:
-        """Tally the stored records per evidence tier for the run report."""
+        """Сосчитать сохранённые записи по уровням доказательств для отчёта прогона."""
         tally: dict[str, int] = {}
         for record in records:
             key = str(record.source_type)

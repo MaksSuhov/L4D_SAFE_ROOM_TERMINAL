@@ -1,4 +1,4 @@
-"""Schemas describing the character persona contract."""
+"""Схемы, описывающие контракт образа персонажа."""
 
 from __future__ import annotations
 
@@ -6,14 +6,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class FewShotExample(BaseModel):
-    """A single user/assistant exchange injected into the chat history."""
+    """Один обмен репликами user/assistant, внедрённый в историю чата."""
 
     user: str = Field(min_length=1)
     assistant: str = Field(min_length=1)
 
 
 class CharacterBase(BaseModel):
-    """Fields shared by every representation of a character."""
+    """Поля, общие для каждого представления персонажа."""
 
     name: str = Field(min_length=1, max_length=128)
     system_prompt: str = Field(min_length=1)
@@ -21,11 +21,11 @@ class CharacterBase(BaseModel):
 
 
 class CharacterCreate(CharacterBase):
-    """Payload accepted by the seeding tooling."""
+    """Payload, принимаемый инструментом наполнения базы."""
 
 
 class CharacterRead(CharacterBase):
-    """Character representation returned by the API."""
+    """Представление персонажа, возвращаемое API."""
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -1,10 +1,10 @@
-"""The on-disk corpus snapshot.
+"""Снимок корпуса на диске.
 
-Fetched and parsed records are written to a JSONL file that is committed to the
-repository. Seeding then reads that file instead of the wiki, which makes the
-vector store reproducible, reviewable in a diff and buildable without network
-access. The raw markup behind a snapshot stays in the wikitext cache, so the
-snapshot can always be regenerated from its source.
+Загруженные и разобранные записи пишутся в файл JSONL, который коммитится в
+репозиторий. Наполнение базы затем читает этот файл вместо вики, за счёт чего
+векторное хранилище воспроизводимо, проверяемо по диффу и собирается без
+доступа к сети. Сырая разметка, лежащая за снимком, остаётся в кэше викитекста,
+так что снимок всегда можно пересобрать из его источника.
 """
 
 from __future__ import annotations
@@ -19,25 +19,25 @@ from app.schemas import LoreChunkCreate
 
 
 class CorpusSnapshot:
-    """Reads and writes the JSONL corpus snapshot."""
+    """Читает и пишет снимок корпуса в JSONL."""
 
     def __init__(self, path: Path) -> None:
         self._path = path
 
     @property
     def path(self) -> Path:
-        """Location of the snapshot file."""
+        """Расположение файла снимка."""
         return self._path
 
     def exists(self) -> bool:
-        """Whether a snapshot has been written already."""
+        """Был ли снимок уже записан."""
         return self._path.is_file()
 
     def write(self, documents: Sequence[LoreChunkCreate]) -> None:
-        """Write ``documents`` as one JSON object per line, atomically.
+        """Записать ``documents`` по одному объекту JSON на строку, атомарно.
 
-        The write goes through a temporary file so an interrupted build cannot
-        leave a truncated corpus behind.
+        Запись идёт через временный файл, чтобы прерванная сборка не оставила
+        после себя усечённый корпус.
         """
         self._path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self._path.with_suffix(f"{self._path.suffix}.tmp")
@@ -48,7 +48,7 @@ class CorpusSnapshot:
         temporary.replace(self._path)
 
     def read(self) -> list[LoreChunkCreate]:
-        """Read every record of the snapshot, rejecting malformed lines."""
+        """Прочитать каждую запись снимка, отвергая некорректные строки."""
         if not self.exists():
             raise ApplicationError(
                 f"Corpus snapshot {self._path} is missing; build it with "
@@ -70,5 +70,5 @@ class CorpusSnapshot:
         return documents
 
     def summarise(self) -> dict[str, int]:
-        """Count the stored records per evidence tier."""
+        """Посчитать сохранённые записи по уровням свидетельств."""
         return dict(Counter(str(document.source_type) for document in self.read()))

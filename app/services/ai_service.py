@@ -34,7 +34,7 @@ TRANSLATION_SYSTEM_PROMPT: str = (
 
 
 class OpenAIClient(AIClientProtocol):
-    """Asynchronous wrapper around embeddings and chat completions."""
+    """Асинхронная обёртка над эмбеддингами и чат-запросами."""
 
     def __init__(self, settings: Settings) -> None:
         if not settings.is_ai_configured:
@@ -53,16 +53,16 @@ class OpenAIClient(AIClientProtocol):
         )
 
     async def get_embedding(self, text: str) -> list[float]:
-        """Embed a single ``text`` with the configured embedding model."""
+        """Получить эмбеддинг одного ``text`` настроенной моделью эмбеддингов."""
         vectors = await self.get_embeddings([text])
         return vectors[0]
 
     async def get_embeddings(self, texts: Sequence[str]) -> list[list[float]]:
-        """Embed ``texts`` in batches, preserving their order.
+        """Получить эмбеддинги для ``texts`` пакетами, сохраняя их порядок.
 
-        The corpus holds hundreds of records, so the texts travel in batches
-        bounded by ``ingestion_batch_size``: one request per record would make
-        seeding needlessly slow and would trip the provider's rate limits.
+        В корпусе сотни записей, поэтому тексты идут пакетами, ограниченными
+        ``ingestion_batch_size``: по одному запросу на запись наполнение базы шло бы
+        без нужды медленно и упёрлось бы в лимиты частоты провайдера.
         """
         pending = list(texts)
         if not pending:
@@ -75,13 +75,13 @@ class OpenAIClient(AIClientProtocol):
         return vectors
 
     async def translate_texts(self, texts: Sequence[str]) -> list[str]:
-        """Translate ``texts`` into the configured corpus language, preserving order.
+        """Перевести ``texts`` на настроенный язык корпуса, сохранив порядок.
 
-        The corpus is normalised once, while it is built, so the vector store and
-        the questions share one language. A batch that comes back malformed is
-        retried one text at a time, and a text that still fails keeps its
-        original wording — a partially translated corpus is far better than a
-        build that dies halfway through.
+        Корпус нормализуется один раз, при сборке, чтобы векторное хранилище и
+        вопросы говорили на одном языке. Пакет, который вернулся испорченным,
+        переводится заново по одному тексту, а текст, который всё равно не поддался,
+        остаётся в исходной формулировке: частично переведённый корпус много лучше
+        сборки, умершей на полпути.
         """
         pending = list(texts)
         if not pending:
@@ -105,7 +105,7 @@ class OpenAIClient(AIClientProtocol):
         user_message: str,
         few_shot_examples: Sequence[Mapping[str, str]] | None = None,
     ) -> str:
-        """Generate an in-character answer grounded in ``context``."""
+        """Сгенерировать ответ в образе, опираясь на ``context``."""
         return await self._create_completion(
             self._compose_messages(system_prompt, context, user_message, few_shot_examples),
             temperature=self._settings.chat_temperature,
@@ -118,7 +118,7 @@ class OpenAIClient(AIClientProtocol):
         user_message: str,
         few_shot_examples: Sequence[Mapping[str, str]] | None = None,
     ) -> AsyncIterator[str]:
-        """Yield the same answer as :meth:`generate_response`, fragment by fragment."""
+        """Отдавать тот же ответ, что :meth:`generate_response`, фрагмент за фрагментом."""
         messages = self._compose_messages(
             system_prompt, context, user_message, few_shot_examples
         )
@@ -147,7 +147,7 @@ class OpenAIClient(AIClientProtocol):
         *,
         temperature: float = 0.0,
     ) -> str:
-        """Answer one instruction, without retrieval and without a persona."""
+        """Ответить на одну инструкцию, без поиска и без образа."""
         messages: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
@@ -155,7 +155,7 @@ class OpenAIClient(AIClientProtocol):
         return await self._create_completion(messages, temperature=temperature)
 
     async def aclose(self) -> None:
-        """Release the underlying HTTP connection pool."""
+        """Освободить нижележащий пул HTTP-соединений."""
         await self._client.close()
 
     async def _create_completion(
@@ -164,7 +164,7 @@ class OpenAIClient(AIClientProtocol):
         *,
         temperature: float,
     ) -> str:
-        """Send one chat request and return its single text answer."""
+        """Отправить один чат-запрос и вернуть единственный текстовый ответ."""
         try:
             completion = await self._client.chat.completions.create(
                 model=self._settings.chat_model,
@@ -190,7 +190,7 @@ class OpenAIClient(AIClientProtocol):
         user_message: str,
         few_shot_examples: Sequence[Mapping[str, str]] | None,
     ) -> list[ChatCompletionMessageParam]:
-        """Build the message list shared by the buffered and the streaming paths."""
+        """Собрать список сообщений, общий для буферизованного и потокового путей."""
         messages: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": self._compose_system_message(system_prompt)},
             {"role": "system", "content": self._compose_context_message(context)},
@@ -200,7 +200,7 @@ class OpenAIClient(AIClientProtocol):
         return messages
 
     async def _embed_batch(self, batch: Sequence[str]) -> list[list[float]]:
-        """Embed one batch and return its vectors in the order of ``batch``."""
+        """Получить эмбеддинги одного пакета в порядке ``batch``."""
         request: dict[str, Any] = {
             "model": self._settings.embedding_model,
             "input": list(batch),
@@ -237,7 +237,7 @@ class OpenAIClient(AIClientProtocol):
         return vectors
 
     async def _translate_batch(self, batch: Sequence[str]) -> list[str]:
-        """Translate one batch, requiring exactly one translation per input."""
+        """Перевести один пакет, требуя ровно один перевод на каждый вход."""
         messages: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": TRANSLATION_SYSTEM_PROMPT},
             {"role": "user", "content": json.dumps(list(batch), ensure_ascii=False)},
@@ -264,7 +264,7 @@ class OpenAIClient(AIClientProtocol):
         return translated
 
     async def _translate_individually(self, batch: Sequence[str]) -> list[str]:
-        """Translate a batch one text at a time, keeping the original on failure."""
+        """Перевести пакет по одному тексту, оставляя исходный при неудаче."""
         translations: list[str] = []
         for text in batch:
             try:
@@ -276,7 +276,7 @@ class OpenAIClient(AIClientProtocol):
 
     @staticmethod
     def _extract_json_array(content: str) -> list[str]:
-        """Pull a JSON string array out of a model reply, tolerating prose around it."""
+        """Вытащить JSON-массив строк из ответа модели, выдержав текст вокруг него."""
         start = content.find("[")
         end = content.rfind("]")
         if start == -1 or end == -1 or end < start:
@@ -293,7 +293,7 @@ class OpenAIClient(AIClientProtocol):
         ]
 
     def _compose_system_message(self, system_prompt: str) -> str:
-        """Append the configured language instruction to the persona prompt."""
+        """Дописать настроенную языковую инструкцию к промпту образа."""
         instruction = self._settings.answer_language_instruction.strip()
         if not instruction:
             return system_prompt
@@ -301,10 +301,10 @@ class OpenAIClient(AIClientProtocol):
 
     @staticmethod
     def _compose_context_message(context: str) -> str:
-        """Wrap the evidence message, substituting a placeholder when empty.
+        """Обернуть сообщение с доказательствами, подставив заглушку, когда оно пусто.
 
-        The message is assembled by the prompt builder, which owns the wording
-        of the two evidence tiers; the provider adapter only transports it.
+        Сообщение собирает конструктор промптов, которому принадлежат формулировки
+        двух уровней доказательств; адаптер провайдера только передаёт его.
         """
         return context.strip() or NO_EVIDENCE_PLACEHOLDER
 

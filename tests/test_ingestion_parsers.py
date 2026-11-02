@@ -1,7 +1,7 @@
-"""Tests for the wiki markup cleaner and the page parsers.
+"""Тесты очистки вики-разметки и парсеров страниц.
 
-Everything here runs on inline markup, so the chunking policy is pinned down
-without touching the network or a database.
+Здесь всё работает на встроенной разметке, поэтому политика нарезки на
+фрагменты закреплена без обращения к сети и базе.
 """
 
 from __future__ import annotations
@@ -116,17 +116,17 @@ def quotes_source() -> WikiSource:
 
 
 def parse_graffiti(markup: str = GRAFFITI_MARKUP) -> list[LoreChunkCreate]:
-    """Run the graffiti parser on ``markup`` as if it came from the wiki."""
+    """Запустить парсер настенных надписей на ``markup``, как будто он пришёл из вики."""
     return GraffitiParser(WikitextCleaner()).parse(graffiti_source(), markup, source_url="wiki")
 
 
 def parse_article(markup: str = ARTICLE_MARKUP) -> list[LoreChunkCreate]:
-    """Run the article parser on ``markup`` as if it came from the wiki."""
+    """Запустить парсер статей на ``markup``, как будто он пришёл из вики."""
     return ArticleParser(WikitextCleaner()).parse(article_source(), markup, source_url="wiki")
 
 
 def parse_quotes(markup: str = QUOTES_MARKUP) -> list[LoreChunkCreate]:
-    """Run the quotes parser on ``markup`` as if it came from the wiki."""
+    """Запустить парсер цитат на ``markup``, как будто он пришёл из вики."""
     return QuotesParser(WikitextCleaner()).parse(quotes_source(), markup, source_url="wiki")
 
 
@@ -150,7 +150,9 @@ class TestWikitextCleaner:
         assert "X.png" not in text
 
     def test_an_infobox_keeps_its_data_and_loses_its_layout(self) -> None:
-        """The health figures live in the infobox; dropping templates would drop them."""
+        """Проверить, что инфобокс сохраняет данные, теряя разметку: цифры здоровья живут
+        в нём, и отброс шаблонов их потерял бы.
+        """
         text = WikitextCleaner().clean(INFOBOX_MARKUP)
 
         assert "Health — 3000 (Easy)" in text
@@ -163,7 +165,9 @@ class TestWikitextCleaner:
         assert "pix" not in WikitextCleaner().clean(INFOBOX_MARKUP)
 
     def test_a_piped_link_inside_an_infobox_does_not_eat_the_next_parameters(self) -> None:
-        """Splitting parameters on every pipe tears a link apart and loses the rest."""
+        """Проверить, что ссылка с вертикальной чертой внутри инфобокса не съедает
+        следующие параметры: разбор по каждой черте разрывает ссылку и теряет остальное.
+        """
         markup = (
             "{{Infobox infected\n"
             "|Ability icon = [[File:icon.png|50px]]\n"
@@ -241,7 +245,9 @@ class TestWikitextCleaner:
 
 
     def test_a_file_link_with_a_link_in_its_caption_is_dropped_whole(self) -> None:
-        """A naive split on pipes tears the caption and leaks a stray ``]]``."""
+        """Проверить, что файловая ссылка со ссылкой в подписи отбрасывается целиком:
+        наивный разбор по чертам рвёт подпись и оставляет лишние ``]]``.
+        """
         markup = (
             "[[Файл:Ammo 1.png|thumb|Склад [[Боеприпасы|боеприпасов]] "
             "может быть использован]]Текст."
@@ -257,7 +263,9 @@ class TestWikitextCleaner:
         assert WikitextCleaner().clean(markup) == "Зелёный грипп — страшный вирус."
 
     def test_interlanguage_links_at_the_end_of_a_page_leave_nothing(self) -> None:
-        """Every article ends with them, and they would become a record of link names."""
+        """Проверить, что межъязыковые ссылки в конце страницы не оставляют ничего: они
+        есть в каждой статье и превратились бы в запись из имён ссылок.
+        """
         markup = (
             "Носители заражают других.\n\n"
             "[[en:Carriers]]\n[[es:Portadores]]\n[[Категория:Заражение]]"
@@ -375,12 +383,12 @@ def subtitles_source() -> WikiSource:
 
 
 def parse_graffiti_table(markup: str = RUSSIAN_GRAFFITI_MARKUP) -> list[LoreChunkCreate]:
-    """Run the graffiti parser on the table layout of the Russian wiki."""
+    """Запустить парсер настенных надписей на табличный формат русской вики."""
     return GraffitiParser(WikitextCleaner()).parse(graffiti_source(), markup, source_url="wiki")
 
 
 def parse_subtitles(markup: str = SUBTITLES_MARKUP) -> list[LoreChunkCreate]:
-    """Run the subtitles parser as if the markup came from the wiki."""
+    """Запустить парсер субтитров, как будто разметка пришла из вики."""
     return SubtitlesParser(WikitextCleaner()).parse(subtitles_source(), markup, source_url="wiki")
 
 

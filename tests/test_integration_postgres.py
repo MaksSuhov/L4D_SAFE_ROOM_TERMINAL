@@ -1,11 +1,11 @@
-"""End-to-end tests against a real PostgreSQL + pgvector instance.
+"""Сквозные тесты против настоящего PostgreSQL + pgvector.
 
-The OpenAI API is replaced by a local HTTP stub, so the whole stack — routers,
-dependency injection, RAG service, prompt builder, repositories, pgvector search
-and the SQLAlchemy engine — runs for real without network access or an API key.
+OpenAI API подменяется локальной HTTP-заглушкой, поэтому весь стек — роутеры,
+внедрение зависимостей, сервис RAG, сборщик промпта, репозитории, поиск pgvector
+и движок SQLAlchemy — работает по-настоящему, без доступа к сети и ключа API.
 
-The module provisions its own ``<database>_test`` database and is skipped when no
-PostgreSQL server is reachable, which keeps ``pytest`` green on a bare machine:
+Модуль заводит собственную базу ``<database>_test`` и пропускается, когда сервер
+PostgreSQL недоступен, что оставляет ``pytest`` зелёным на голой машине:
 
     docker compose up -d
     pytest tests/test_integration_postgres.py
@@ -48,18 +48,18 @@ VOICE_SAMPLE = "Эллис: Мы отличная команда, чувак!"
 
 
 def unit_vector(axis: int, size: int = EMBEDDING_SIZE) -> list[float]:
-    """Return a basis vector, used to craft deterministic cosine distances."""
+    """Вернуть базисный вектор, нужный для детерминированных косинусных дистанций."""
     vector = [0.0] * size
     vector[axis] = 1.0
     return vector
 
 
 def topic_embedding(text_value: str) -> list[float]:
-    """Map a text to a basis vector so that retrieval order is meaningful.
+    """Отобразить текст на базисный вектор, чтобы порядок выдачи был осмысленным.
 
-    Texts about the same subject land on the same axis, which gives a cosine
-    similarity of 1.0 for a matching query and 0.0 for an unrelated one. The
-    axes are placed far apart so that each evidence tier lands on its own.
+    Тексты на одну тему попадают на одну ось, что даёт косинусную близость 1.0 для
+    совпадающего запроса и 0.0 для постороннего. Оси разнесены далеко друг от друга,
+    чтобы каждый уровень доказательств попадал на свою.
     """
     lowered = text_value.lower()
     if "tank" in lowered or "танк" in lowered:
@@ -76,7 +76,7 @@ def topic_embedding(text_value: str) -> list[float]:
 
 
 def corpus() -> list[LoreChunkCreate]:
-    """A miniature corpus holding a record of every evidence tier."""
+    """Миниатюрный корпус, хранящий по записи на каждый уровень доказательств."""
     return [
         LoreChunkCreate(
             content=TANK_FACT,
@@ -107,7 +107,7 @@ def corpus() -> list[LoreChunkCreate]:
 
 
 class _MockOpenAIHandler(BaseHTTPRequestHandler):
-    """Answers embeddings and chat completions in the OpenAI wire format."""
+    """Отвечает на эмбеддинги и чат-дополнения в сетевом формате OpenAI."""
 
     requests: list[dict[str, Any]] = []
 
@@ -160,11 +160,11 @@ class _MockOpenAIHandler(BaseHTTPRequestHandler):
         self.wfile.write(encoded)
 
     def log_message(self, format: str, *args: Any) -> None:
-        """Silence the default stderr logging."""
+        """Заглушить стандартное логирование в stderr."""
 
 
 class MockOpenAIServer:
-    """Context manager running the stub on a free localhost port."""
+    """Контекстный менеджер, поднимающий заглушку на свободном порту localhost."""
 
     def __init__(self) -> None:
         _MockOpenAIHandler.requests = []
@@ -192,13 +192,13 @@ class MockOpenAIServer:
 
 
 def integration_database_url(base_url: str) -> str:
-    """Derive the integration database name from the configured DSN."""
+    """Вывести имя интеграционной базы из настроенного DSN."""
     url = make_url(base_url)
     return url.set(database=f"{url.database}_test").render_as_string(hide_password=False)
 
 
 async def ensure_test_database(admin_url: str, database_name: str) -> None:
-    """Create the integration database if the server does not have it yet."""
+    """Создать интеграционную базу, если её ещё нет на сервере."""
     engine = create_async_engine(admin_url, isolation_level="AUTOCOMMIT")
     try:
         async with engine.connect() as connection:
@@ -214,7 +214,7 @@ async def ensure_test_database(admin_url: str, database_name: str) -> None:
 
 @pytest.fixture
 async def seeded_settings(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Settings]:
-    """Provision the test database, seed it and expose the active settings."""
+    """Подготовить тестовую базу, наполнить её и отдать действующие настройки."""
     admin_url = get_settings().database_url
     integration_url = integration_database_url(admin_url)
     database_name = make_url(integration_url).database or ""
@@ -258,7 +258,7 @@ async def seeded_settings(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Sett
 
 @pytest.fixture
 def mock_openai_server(seeded_settings: Settings) -> Iterator[list[dict[str, Any]]]:
-    """Expose the requests recorded by the stub during the request under test."""
+    """Отдать запросы, записанные заглушкой во время проверяемого запроса."""
     yield _MockOpenAIHandler.requests
 
 
@@ -296,7 +296,9 @@ async def test_seed_creates_personas_lore_and_hnsw_index(seeded_settings: Settin
 
 
 async def test_seeding_twice_does_not_duplicate_records(seeded_settings: Settings) -> None:
-    """The fixture already ran the seeder twice; the corpus must be stored once."""
+    """Проверить, что при двойном наполнении записи не дублируются: фикстура уже
+    запустила seed-скрипт дважды, а корпус должен сохраниться один раз.
+    """
     database = Database(seeded_settings)
     try:
         async with database.session() as session:
@@ -306,7 +308,7 @@ async def test_seeding_twice_does_not_duplicate_records(seeded_settings: Setting
 
 
 async def test_personas_are_updated_in_place(seeded_settings: Settings) -> None:
-    """Editing a persona must take effect without dropping the database."""
+    """Проверить, что правка персонажа применяется на месте, без пересоздания базы."""
     from seed import CHARACTER_SEEDS, DatabaseSeeder
 
     database = Database(seeded_settings)
@@ -513,10 +515,10 @@ def embedded_record(
     *,
     isolated: bool = False,
 ) -> EmbeddedLoreChunk:
-    """Build a storable record around a hand-made vector.
+    """Собрать сохраняемую запись вокруг вектора, сделанного вручную.
 
-    ``isolated`` parks the record under a topic no corpus record uses, which
-    keeps a test about vector ordering independent of the seeded data.
+    ``isolated`` помещает запись в тему, не занятую ни одной записью корпуса: так
+    тест о порядке векторов не зависит от наполненных данных.
     """
     return EmbeddedLoreChunk(
         content=content,

@@ -1,4 +1,4 @@
-"""Tests for the wiki client: caching, retries and error translation."""
+"""Тесты клиента вики: кэширование, повторы и перевод ошибок."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ PAGE_WIKITEXT = "== The Subway ==\n*NO CURE\n"
 
 
 class WikiStub:
-    """Answers ``action=parse`` requests and counts them."""
+    """Отвечает на запросы ``action=parse`` и считает их."""
 
     def __init__(self, responses: list[httpx.Response] | None = None) -> None:
         self.requests: list[httpx.Request] = []
@@ -64,7 +64,7 @@ def build_client(stub: WikiStub, tmp_path: Path, **overrides: Any) -> MediaWikiC
 
 @pytest.fixture(autouse=True)
 def _instant_retries(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the retry test fast; the backoff itself is not what is under test."""
+    """Держать тест повторов быстрым: сам backoff — не то, что проверяется."""
     monkeypatch.setattr(wiki_client_module, "BACKOFF_SECONDS", 0.0)
 
 

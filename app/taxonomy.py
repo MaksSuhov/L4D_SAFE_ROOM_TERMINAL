@@ -1,18 +1,18 @@
-"""Domain vocabulary of the lore archive.
+"""Доменный словарь архива лора.
 
-The taxonomy is deliberately kept out of the ORM, the schemas and the ingestion
-package: every layer needs to name the same concepts (what kind of evidence a
-chunk is, which wiki section it came from), so the vocabulary lives on its own
-and the layers depend on it instead of on each other.
+Таксономия намеренно держится вне ORM, схем и пакета индексации: каждому слою
+нужно называть одни и те же понятия (какой перед нами вид доказательств, из
+какого раздела вики он взялся), поэтому словарь живёт сам по себе, и слои
+зависят от него, а не друг от друга.
 
-Two axes describe a chunk:
+Фрагмент описывают две оси:
 
-* :class:`SourceType` — *how trustworthy* the record is, which is what the
-  retrieval pipeline branches on. Official lore is verified encyclopaedia
-  material, graffiti is hearsay scrawled on a safe-room wall, and voice samples
-  are the recorded lines of a character.
-* :class:`LoreTopic` — *what* the record is about, used for reporting and for
-  narrowing a search when a caller wants a single subject.
+* :class:`SourceType` — *насколько* запись достоверна, именно по этому признаку
+  ветвится конвейер выборки. Официальный лор — проверенный материал
+  энциклопедии, граффити — слухи, нацарапанные на стене убежища, а голосовые
+  образцы — записанные реплики персонажа.
+* :class:`LoreTopic` — *о чём* запись, используется для отчётности и для
+  сужения поиска, когда вызывающему нужен один предмет.
 """
 
 from __future__ import annotations
@@ -21,63 +21,63 @@ from enum import StrEnum
 
 
 class SourceType(StrEnum):
-    """Evidence tier of a lore record.
+    """Уровень достоверности записи лора.
 
-    The values are stored verbatim in the database, so the members double as the
-    values a SQL ``CHECK`` constraint and the API contract rely on.
+    Значения хранятся в базе данных дословно, так что члены перечисления служат
+    ещё и значениями, на которые опираются SQL-ограничение ``CHECK`` и контракт API.
     """
 
     OFFICIAL = "official"
-    """Encyclopaedia lore from the Fandom wiki articles."""
+    """Лор из статей энциклопедии на вики Fandom."""
 
     GRAFFITI = "graffiti"
-    """Unverified messages left by survivors on safe-room walls."""
+    """Непроверенные сообщения, оставленные выжившими на стенах убежищ."""
 
     VOICE = "voice"
-    """Recorded dialogue of one character, used to imitate their manner of speech."""
+    """Записанные реплики одного персонажа, служащие для имитации его манеры речи."""
 
 
 class LoreTopic(StrEnum):
-    """Subject area of a lore record, mirroring the wiki's own sections."""
+    """Предметная область записи лора, повторяющая разделы самой вики."""
 
     INFECTION = "infection"
-    """The Green Flu: origin theories, CEDA, carriers, the military response."""
+    """Зелёный грипп: теории происхождения, CEDA, носители, ответ военных."""
 
     SURVIVORS = "survivors"
-    """Survivor biographies and facts."""
+    """Биографии выживших и факты о них."""
 
     INFECTED = "infected"
-    """Common, uncommon and special infected, their mutations and behaviour."""
+    """Обычные, необычные и особые заражённые, их мутации и поведение."""
 
     CAMPAIGNS = "campaigns"
-    """Campaign and chapter walkthroughs."""
+    """Прохождения кампаний и глав."""
 
     SAFE_ROOMS = "safe_rooms"
-    """Safe-room mechanics and the terminal itself."""
+    """Механика убежищ и сам терминал."""
 
     GRAFFITI = "graffiti"
-    """The wall inscriptions of the safe rooms."""
+    """Настенные надписи убежищ."""
 
     QUOTES = "quotes"
-    """Dialogue lines of the survivors."""
+    """Реплики выживших."""
 
     WEAPONS = "weapons"
-    """The arsenal: firearms, melee weapons, ammunition and upgrades."""
+    """Арсенал: огнестрельное и холодное оружие, боеприпасы и улучшения."""
 
     ITEMS = "items"
-    """Pickups and deployables: healing, throwables, gas cans, props."""
+    """Подбираемое и устанавливаемое: лечение, метательное, канистры, декорации."""
 
     LOCATIONS = "locations"
-    """Named places of the outbreak, from hospitals to fairgrounds."""
+    """Именованные места вспышки, от больниц до ярмарочных площадей."""
 
     GAME_MODES = "game_modes"
-    """Game modes, difficulty levels and the rules that shape a run."""
+    """Режимы игры, уровни сложности и правила, задающие ход партии."""
 
     ACHIEVEMENTS = "achievements"
-    """The achievements and the stunts they reward."""
+    """Достижения и трюки, за которые они даются."""
 
     NPCS = "npcs"
-    """Non-playable characters: Virgil, Whitaker, the military."""
+    """Неигровые персонажи: Virgil, Whitaker, военные."""
 
     TACTICS = "tactics"
-    """Advice and strategies the survivors wrote down for each other."""
+    """Советы и стратегии, которые выжившие записали друг для друга."""

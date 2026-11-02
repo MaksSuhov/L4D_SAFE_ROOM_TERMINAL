@@ -1,10 +1,3 @@
-"""Сводка по прогону: средние значения и человекочитаемый отчёт.
-
-Класс :class:`EvaluationReport` — только агрегатор: он не ходит ни в сеть, ни в
-базу, ему на вход дают готовые :class:`~app.evaluation.domain.CaseResult`, а он
-умеет посчитать средние, отдать словарь для JSON и напечатать текст.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Iterable

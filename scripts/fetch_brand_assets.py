@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""Derive the artwork that skins the terminal UI from the Left 4 Dead wiki.
+"""Готовит графику, которая оформляет интерфейс терминала, из вики Left 4 Dead.
 
-The script mirrors the corpus pipeline in spirit: the sources are declared in
-one table, every output is a pure function of the downloaded bytes, and the
-results are committed so that building the UI never touches the network.
+По духу скрипт повторяет конвейер корпуса: источники объявлены в одной таблице,
+каждый результат — чистая функция от скачанных байтов, а результаты закоммичены,
+поэтому сборка интерфейса никогда не обращается к сети.
 
-* **Survivor portraits.** The wiki hosts full-body renders, not head shots, so
-  each survivor declares where their head sits in the render (as fractions of
-  the bitmap). Cropping from the render keeps all eight avatars on the same
-  footing instead of mixing the 43 px L4D1 HUD icons with the 66 px L4D2 ones.
-* **Backdrop.** The Special Infected wallpaper; the bottom strip is trimmed to
-  drop the fan-site watermark.
-* **Mark.** The blood-splattered "4" of the official logo, isolated from the
-  rest of the wordmark so the header can print a small L4D badge.
+* **Портреты выживших.** В вики лежат рендеры в полный рост, а не головы, поэтому
+  каждый выживший объявляет, где на рендере сидит его голова (в долях от
+  битмапа). Обрезка из рендера держит все восемь аватаров в одном масштабе и не
+  смешивает HUD-иконки L4D1 в 43 px с иконками L4D2 в 66 px.
+* **Фон.** Обои Special Infected; нижняя полоса обрезана, чтобы убрать вотермарку
+  фан-сайта.
+* **Знак.** Забрызганная кровью «4» официального логотипа, выделенная из
+  остального начертания, чтобы шапка могла напечатать маленький бейдж L4D.
 
-Run it with ``make assets`` (needs Pillow, see ``requirements-dev.txt``).
+Запуск: ``make assets`` (нужен Pillow, см. ``requirements-dev.txt``).
 
-The artwork is Valve's property. It is used here as fan art in a
-non-commercial portfolio project and is credited in the README.
+Графика принадлежит Valve. Здесь она используется как фанатское творчество в
+некоммерческом портфолио-проекте и указана в README.
 """
 
 from __future__ import annotations
@@ -50,38 +50,40 @@ BACKGROUND_PATH = PUBLIC_DIR / "backgrounds" / "specials.jpg"
 MARK_PATH = PUBLIC_DIR / "brand" / "l4d-mark.png"
 
 AVATAR_SIZE = 192
-"""Side of a generated portrait; 4x the largest frame the UI draws it in."""
+"""Сторона сгенерированного портрета; в 4 раза больше самого крупного кадра,
+в котором его рисует интерфейс."""
 
 HEAD_SHARE_OF_FRAME = 0.58
-"""Fraction of the avatar the head fills — the rest is hair and shoulders."""
-
+"""Доля аватара, которую занимает голова, — остальное волосы и плечи."""
 HEADROOM_SHARE = 0.10
-"""Space above the head, so a beret or a cap is not glued to the edge."""
+"""Отступ над головой, чтобы берет или кепка не прилипали к краю."""
 
 HEAD_SHARE_OF_FIGURE = 0.118
-"""Head height as a fraction of the survivor's own height.
+"""Высота головы как доля от собственного роста выжившего.
 
-Every render is a full-body pose, and a human head is consistently about an
-eighth of the body, so one ratio frames all eight portraits at the same scale.
+Каждый рендер — это поза в полный рост, а человеческая голова всегда составляет
+примерно восьмую часть тела, поэтому одно соотношение кадрирует все восемь
+портретов в одном масштабе.
 """
 
 
 @dataclass(frozen=True, slots=True)
 class AvatarSource:
-    """A survivor portrait and where their head sits inside it."""
+    """Портрет выжившего и то, где на нём сидит его голова."""
 
     name: str
-    """Name as the API returns it — the key the frontend resolves avatars by."""
+    """Имя в том виде, в каком его возвращает API, — ключ, по которому фронтенд
+    находит аватары."""
 
     slug: str
     wiki_file: str
     head_center_x: float
-    """Horizontal centre of the head, as a fraction of the bitmap's width.
+    """Горизонтальный центр головы, как доля от ширины битмапа.
 
-    Only the horizontal position is declared: the renders are posed, so each
-    survivor leans a different way, and no rule reads the head out of a
-    silhouette reliably enough. The vertical extent comes from the measured
-    bounding box of the figure, which needs no per-survivor tuning.
+    Объявлена только горизонтальная позиция: рендеры — это позы, поэтому каждый
+    выживший наклонён по-своему, и ни одно правило не вычитывает голову из силуэта
+    достаточно надёжно. Вертикальные границы берутся из измеренного ограничивающего
+    прямоугольника фигуры, который не требует подгонки под каждого выжившего.
     """
 
 
@@ -100,32 +102,32 @@ AVATARS: tuple[AvatarSource, ...] = (
 
 BACKGROUND_WIKI_FILE = "Specials 1920x1200 wallpaper.jpg"
 BACKGROUND_HEIGHT = 1100
-"""Rows kept from the top of the 1920x1200 wallpaper — trims the watermark."""
-
+"""Сколько строк оставлено сверху от обоев 1920x1200 — так срезается вотермарка."""
 BACKGROUND_QUALITY = 86
 
 LOGO_WIKI_FILE = "Left 4 Dead Logo.svg"
 MARK_SIZE = 256
-"""Square side of the generated badge — 8x the height the header draws it at.
+"""Сторона квадрата сгенерированного бейджа — в 8 раз больше высоты, на которой его
+рисует шапка.
 
-The splatter is traced from a 790x400 render, so the badge is already close to
-its native resolution; growing it further would only cost bytes.
+Брызги обведены с рендера 790x400, поэтому бейдж уже близок к своему нативному
+разрешению; дальнейшее увеличение только добавит байтов.
 """
 
 MARK_DRIP_RADIUS = 34
-"""Blood droplets within this many pixels of the splat join the badge."""
+"""Капли крови в пределах стольких пикселей от кляксы попадают в бейдж."""
 
 RED_CHANNEL_MINIMUM = 90
 RED_DOMINANCE = 1.5
-"""A pixel counts as blood when red beats green and blue by this factor."""
+"""Пиксель считается кровью, когда красный превышает зелёный и синий во столько раз."""
 
 
 class AssetError(RuntimeError):
-    """Raised when an upstream asset cannot be fetched or rasterised."""
+    """Возникает, когда вышестоящий ресурс не удаётся скачать или растеризовать."""
 
 
 def _ensure_pillow() -> None:
-    """Fail early with an actionable message when Pillow is not installed."""
+    """Раньше упасть с понятным сообщением, если Pillow не установлен."""
     try:
         import PIL  # noqa: F401, PLC0415 - optional dependency
     except ModuleNotFoundError as error:  # pragma: no cover - environment guard
@@ -136,7 +138,7 @@ def _ensure_pillow() -> None:
 
 
 def _wiki_image_url(client: httpx.Client, wiki_file: str) -> str:
-    """Resolve a wiki file title to a direct CDN URL."""
+    """Преобразовать название файла вики в прямой URL на CDN."""
     query = urllib.parse.urlencode(
         {
             "action": "query",
@@ -157,7 +159,7 @@ def _wiki_image_url(client: httpx.Client, wiki_file: str) -> str:
 
 
 def download(client: httpx.Client, wiki_file: str) -> bytes:
-    """Fetch the original bitmap of a wiki file."""
+    """Скачать исходный битмап файла вики."""
     url = _wiki_image_url(client, wiki_file)
     response = client.get(url)
     response.raise_for_status()
@@ -165,7 +167,7 @@ def download(client: httpx.Client, wiki_file: str) -> bytes:
 
 
 def _opaque_cover(image: Image) -> Image:
-    """Return the bitmap with its transparency spread over black."""
+    """Вернуть битмап, разложив его прозрачность поверх чёрного фона."""
     from PIL import Image  # noqa: PLC0415 - optional dependency
 
     canvas = Image.new("RGBA", image.size, (0, 0, 0, 0))
@@ -174,7 +176,7 @@ def _opaque_cover(image: Image) -> Image:
 
 
 def crop_avatar(image: Image, source: AvatarSource, size: int = AVATAR_SIZE) -> Image:
-    """Cut the declared head out of a render and frame it as a square avatar."""
+    """Вырезать объявленную голову из рендера и обрамить её квадратным аватаром."""
     from PIL import Image  # noqa: PLC0415 - optional dependency
 
     width, height = image.size
@@ -195,12 +197,12 @@ def crop_avatar(image: Image, source: AvatarSource, size: int = AVATAR_SIZE) -> 
 
 
 def trim_background(image: Image) -> Image:
-    """Drop the watermark strip the fan-site wallpaper carries at the bottom."""
+    """Убрать полосу с вотермаркой, которую обои фан-сайта несут внизу."""
     return image.convert("RGB").crop((0, 0, image.width, min(BACKGROUND_HEIGHT, image.height)))
 
 
 def _blood_components(image: Image) -> list[list[tuple[int, int]]]:
-    """Group the red pixels into connected blobs, largest first."""
+    """Сгруппировать красные пиксели в связные кляксы, сначала самые крупные."""
     import numpy as np  # noqa: PLC0415 - optional dependency, kept local
 
     pixels = np.asarray(image.convert("RGBA"), dtype=np.int16)
@@ -242,11 +244,11 @@ def _blood_components(image: Image) -> list[list[tuple[int, int]]]:
 
 
 def crop_mark(image: Image, size: int = MARK_SIZE) -> Image:
-    """Isolate the blood-splattered "4" from the logo and centre it on a square.
+    """Выделить забрызганную кровью «4» из логотипа и отцентрировать её на квадрате.
 
-    The numeral itself is a knockout in the source vector, so the badge shows
-    whatever sits behind it — on the dark header that reads as the ink of the
-    glyph, which is exactly how the logo behaves when it is printed on black.
+    Сама цифра в исходном векторе — это вырез, поэтому бейдж показывает то, что
+    стоит за ней, — на тёмной шапке это читается как краска глифа, и именно так
+    ведёт себя логотип при печати по чёрному.
     """
     from PIL import Image  # noqa: PLC0415 - optional dependency
 
@@ -288,7 +290,7 @@ def crop_mark(image: Image, size: int = MARK_SIZE) -> Image:
 
 
 def rasterise_svg(data: bytes) -> Image:
-    """Rasterise an SVG, using whichever renderer the machine provides."""
+    """Растеризовать SVG тем рендерером, который есть на машине."""
     from PIL import Image  # noqa: PLC0415 - optional dependency
 
     try:
@@ -336,7 +338,7 @@ def _write(image: Image, path: Path, **save_options: Any) -> None:
 
 
 def build_avatars(client: httpx.Client) -> None:
-    """Cut every survivor's portrait out of their wiki render."""
+    """Вырезать портрет каждого выжившего из его рендера в вики."""
     from PIL import Image  # noqa: PLC0415 - optional dependency
 
     print("survivor portraits")
@@ -347,7 +349,7 @@ def build_avatars(client: httpx.Client) -> None:
 
 
 def build_background(client: httpx.Client) -> None:
-    """Store the Special Infected wallpaper as the app backdrop."""
+    """Сохранить обои Special Infected как фон приложения."""
     from PIL import Image  # noqa: PLC0415 - optional dependency
 
     print("backdrop")
@@ -357,7 +359,7 @@ def build_background(client: httpx.Client) -> None:
 
 
 def build_mark(client: httpx.Client) -> None:
-    """Cut the L4D badge out of the official logo."""
+    """Вырезать бейдж L4D из официального логотипа."""
     print("terminal badge")
     logo = rasterise_svg(download(client, LOGO_WIKI_FILE))
     _write(crop_mark(logo), MARK_PATH, optimize=True)
@@ -371,13 +373,13 @@ BUILDERS = {
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Download the artwork and write every derived asset into ``public/``."""
+    """Скачать графику и записать каждый производный ресурс в ``public/``."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--only",
         action="append",
         choices=sorted(BUILDERS),
-        help="build just this group of assets (repeatable); defaults to all",
+        help="собрать только эту группу ассетов (можно повторять); по умолчанию — все",
     )
     arguments = parser.parse_args(argv)
     selected = arguments.only or sorted(BUILDERS)

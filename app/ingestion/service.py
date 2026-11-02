@@ -1,10 +1,10 @@
-"""Building the corpus: fetch, parse, normalise, deduplicate, snapshot.
+"""Сборка корпуса: загрузка, разбор, нормализация, дедупликация, снимок.
 
-This is the composition root of the ingestion stage. It knows the order of the
-steps and nothing about their internals: the wiki client fetches, the parsers
-extract, the translator rewrites and the snapshot stores. Swapping any of them —
-a different wiki, a different chunking policy, no translation at all — is a
-matter of injecting a different collaborator.
+Это композиционный корень этапа загрузки. Он знает порядок шагов и ничего об
+их внутренностях: клиент вики забирает, парсеры извлекают, переводчик
+переписывает, а снимок сохраняет. Замена любого из них — другой источник,
+другая политика нарезки на фрагменты, полный отказ от перевода — это вопрос
+подстановки другого партнёра.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ logger = logging.getLogger("l4d.ingestion")
 
 @dataclass(frozen=True, slots=True)
 class CorpusBuildReport:
-    """What one corpus build produced, for the CLI summary and the tests."""
+    """Что дала одна сборка корпуса, для сводки CLI и тестов."""
 
     pages: int = 0
     documents: int = 0
@@ -37,7 +37,7 @@ class CorpusBuildReport:
 
 
 class WikiCorpusBuilder:
-    """Turns the declared wiki sources into a normalised corpus."""
+    """Превращает объявленные источники вики в нормализованный корпус."""
 
     def __init__(
         self,
@@ -55,10 +55,10 @@ class WikiCorpusBuilder:
         self._sources = sources
 
     async def build(self, *, refresh: bool = False, translate: bool = False) -> CorpusBuildReport:
-        """Fetch and parse every source, then persist the corpus snapshot.
+        """Забрать и разобрать каждый источник, затем сохранить снимок корпуса.
 
-        ``refresh`` re-reads the wiki instead of the local markup cache and
-        ``translate`` normalises the result into the corpus language first.
+        ``refresh`` перечитывает вики вместо локального кэша разметки, а
+        ``translate`` сначала приводит результат к языку корпуса.
         """
         pages = await self._fetch(reindex_markup=refresh)
         documents, duplicates = self._parse(pages)
@@ -90,7 +90,7 @@ class WikiCorpusBuilder:
         return report
 
     async def _fetch(self, *, reindex_markup: bool) -> dict[str, str]:
-        """Fetch every declared page, reporting progress as it goes."""
+        """Забрать каждую объявленную страницу, сообщая о ходе работы."""
         titles = [source.page for source in self._sources]
         logger.info(
             "Fetching %d wiki page(s)%s",
@@ -106,11 +106,11 @@ class WikiCorpusBuilder:
         return pages
 
     def _parse(self, pages: Mapping[str, str]) -> tuple[list[LoreChunkCreate], int]:
-        """Run every page through its parser and drop the duplicates.
+        """Прогнать каждую страницу через её парсер и отбросить дубликаты.
 
-        A page can be reached twice — through a redirect, or because two
-        sections hold the same inscription — and the same text embedded twice
-        would skew retrieval towards whoever repeated it.
+        Страницу можно получить дважды — через перенаправление или потому что два
+        раздела содержат одну и ту же надпись, — а один и тот же текст, проиндексированный
+        дважды, сместит поиск в пользу того, кто его повторил.
         """
         documents: list[LoreChunkCreate] = []
         seen: set[tuple[str, str]] = set()
@@ -132,7 +132,7 @@ class WikiCorpusBuilder:
 
 
 def _remember(seen: set[tuple[str, str]], document: LoreChunkCreate) -> bool:
-    """Register a record as seen, reporting whether it is new."""
+    """Отметить запись как увиденную, сообщив, новая ли она."""
     key = (str(document.source_type), document.content)
     if key in seen:
         return False
@@ -141,5 +141,5 @@ def _remember(seen: set[tuple[str, str]], document: LoreChunkCreate) -> bool:
 
 
 def _tally(values: Iterable[str]) -> dict[str, int]:
-    """Count the occurrences of every value, in a stable order."""
+    """Посчитать вхождения каждого значения в устойчивом порядке."""
     return dict(sorted(Counter(values).items()))
