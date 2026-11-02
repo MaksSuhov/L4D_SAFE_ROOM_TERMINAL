@@ -171,9 +171,34 @@ class Settings(BaseSettings):
         ge=-1.0,
         le=1.0,
         description=(
-            "Floor for the character's own lines. They are a style reference rather "
-            "than evidence, so the most relevant ones are passed on even when the "
-            "question is unrelated to what they were recorded for."
+            "Порог для собственных реплик персонажа. Они служат образцом стиля, а не "
+            "доказательством, поэтому самые близкие передаются даже когда вопрос не "
+            "связан с тем, для чего эти реплики записаны."
+        ),
+    )
+
+    # --- HIDE: hypothetical expansion of the question ---------------------
+    # A question may share no wording with the record that answers it: the
+    # player asks about a character, while the record lives in the article of
+    # the campaign that character appears in. HIDE asks the model for
+    # hypothetical formulations (and one hypothetical article fragment) that
+    # bridge those entities, searches each of them, and fuses the matches by
+    # similarity — the budgets and floors of the tiers keep their meaning.
+    hide_enabled: bool = Field(
+        default=True,
+        description=(
+            "Искать по гипотетическим формулировкам (HIDE), а не только по исходному "
+            "вопросу. Отключается, когда важнее время до первого токена: расширение "
+            "добавляет один запрос к провайдеру перед поиском."
+        ),
+    )
+    hide_max_questions: int = Field(
+        default=4,
+        ge=0,
+        le=10,
+        description=(
+            "Сколько формулировок HIDE вправе добавить к исходному вопросу; 0 — "
+            "не добавлять ни одной."
         ),
     )
 

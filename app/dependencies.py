@@ -16,9 +16,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.database import Database
 from app.exceptions import AIServiceError
-from app.interfaces import AIClientProtocol
+from app.interfaces import AIClientProtocol, QueryExpanderProtocol
 from app.repositories import CharacterRepository, LoreChunkRepository
-from app.services import ArchivePromptBuilder, RAGService, RetrievalPolicy, TierPolicy
+from app.services import (
+    ArchivePromptBuilder,
+    HideQueryExpander,
+    NoQueryExpander,
+    RAGService,
+    RetrievalPolicy,
+    TierPolicy,
+)
 
 
 async def get_database(request: Request) -> Database:
@@ -69,12 +76,32 @@ def get_prompt_builder() -> ArchivePromptBuilder:
     return ArchivePromptBuilder()
 
 
+def build_query_expander(ai_client: AIClientProtocol, settings: Settings) -> QueryExpanderProtocol:
+    """Собрать расширитель запроса по настройкам: HIDE или его выключенную заглушку.
+
+    Отдельная функция нужна офлайн-стенду оценки: он собирает те же зависимости, что
+    и HTTP-слой, но без графа ``Depends``.
+    """
+    if not settings.hide_enabled:
+        return NoQueryExpander()
+    return HideQueryExpander(ai_client, max_questions=settings.hide_max_questions)
+
+
+def get_query_expander(
+    ai_client: Annotated[AIClientProtocol, Depends(get_ai_client)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> QueryExpanderProtocol:
+    """Вернуть расширитель запроса, общий для всех ходов разговора."""
+    return build_query_expander(ai_client, settings)
+
+
 def get_rag_service(
     character_repository: Annotated[CharacterRepository, Depends(get_character_repository)],
     lore_chunk_repository: Annotated[LoreChunkRepository, Depends(get_lore_chunk_repository)],
     prompt_builder: Annotated[ArchivePromptBuilder, Depends(get_prompt_builder)],
     ai_client: Annotated[AIClientProtocol, Depends(get_ai_client)],
     settings: Annotated[Settings, Depends(get_settings)],
+    query_expander: Annotated[QueryExpanderProtocol, Depends(get_query_expander)],
 ) -> RAGService:
     """Собрать RAG-конвейер из его зависимостей и конфигурации."""
     return RAGService(
@@ -96,6 +123,7 @@ def get_rag_service(
                 min_similarity=settings.rag_voice_min_similarity,
             ),
         ),
+        query_expander=query_expander,
     )
 
 

@@ -20,7 +20,7 @@ from pathlib import Path
 
 from app.config import Settings, get_settings
 from app.database import Database
-from app.dependencies import get_rag_service
+from app.dependencies import build_query_expander, get_rag_service
 from app.evaluation import CaseEvaluator, EvaluationReport, EvaluationService, LLMJudge, load_cases
 from app.exceptions import AIServiceError, EvaluationError
 from app.repositories import CharacterRepository, LoreChunkRepository
@@ -73,6 +73,7 @@ async def evaluate(*, dataset: Path, limit: int) -> EvaluationReport:
                 ArchivePromptBuilder(),
                 client,
                 settings,
+                build_query_expander(client, settings),
             )
             evaluator = CaseEvaluator(
                 context_builder=rag_service,
