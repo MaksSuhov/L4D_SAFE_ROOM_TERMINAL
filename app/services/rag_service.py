@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -9,11 +10,23 @@ from app.interfaces import (
     CharacterRepositoryProtocol,
     LoreChunkRepositoryProtocol,
     PreparedChat,
+    QueryExpanderProtocol,
     RetrievedChunk,
 )
 from app.schemas import ChatResponse, LoreSource
 from app.services.prompt_builder import ArchiveEvidence, ArchivePromptBuilder
+from app.services.query_expander import NoQueryExpander
 from app.taxonomy import SourceType
+
+logger = logging.getLogger("l4d.rag")
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalProbe:
+    """Одна поисковая формулировка вместе с эмбеддингом своего текста."""
+
+    query: str
+    embedding: Sequence[float]
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,14 +72,15 @@ class RetrievalPolicy:
 class RAGService:
     """Двухуровневая генерация с дополнением из поиска для одного сообщения чата.
 
-    Поток: получить эмбеддинг вопроса -> найти три уровня доказательств по
-    отдельности (проверенный лор, настенные надписи, собственные реплики
-    персонажа) -> загрузить образ -> собрать архивную сводку -> сгенерировать
-    ответ.
+    Поток: развернуть вопрос в поисковые формулировки (HIDE) -> получить их
+    эмбеддинги -> найти три уровня доказательств по отдельности (проверенный лор,
+    настенные надписи, собственные реплики персонажа) -> загрузить образ -> собрать
+    архивную сводку -> сгенерировать ответ.
 
     Уровни находятся отдельными запросами со своими бюджетами. В этом суть
     конвейера: стена слухов не может вытеснить проверенный лор из контекста,
-    потому что они никогда не конкурируют за одни и те же места.
+    потому что они никогда не конкурируют за одни и те же места. Формулировок же
+    может быть несколько — они лишь решают, *какие* записи займут эти места.
     """
 
     def __init__(
@@ -77,12 +91,14 @@ class RAGService:
         ai_client: AIClientProtocol,
         *,
         policy: RetrievalPolicy | None = None,
+        query_expander: QueryExpanderProtocol | None = None,
     ) -> None:
         self._characters = character_repository
         self._lore_chunks = lore_chunk_repository
         self._prompt_builder = prompt_builder
         self._ai_client = ai_client
         self._policy = policy or RetrievalPolicy()
+        self._query_expander = query_expander or NoQueryExpander()
 
     async def process_chat_message(self, character_id: int, user_message: str) -> ChatResponse:
         """Ответить на ``user_message`` от лица персонажа с ``character_id``."""
@@ -114,8 +130,8 @@ class RAGService:
         if character is None:
             raise CharacterNotFoundError(character_id)
 
-        query_embedding = await self._ai_client.get_embedding(user_message)
-        evidence = await self._retrieve_evidence(query_embedding, character.name)
+        probes = await self._build_probes(user_message)
+        evidence = await self._retrieve_evidence(probes, character.name)
 
         return PreparedChat(
             character_id=character.id,
@@ -127,17 +143,32 @@ class RAGService:
             sources=self._build_sources(evidence.all_chunks),
         )
 
+    async def _build_probes(self, question: str) -> list[RetrievalProbe]:
+        """Развернуть вопрос в формулировки HIDE и посчитать их эмбеддинги.
+
+        Все формулировки уходят одним пакетным запросом, поэтому расширение стоит
+        одного обращения к провайдеру, сколько бы формулировок ни вернулось.
+        """
+        expanded = await self._query_expander.expand(question)
+        vectors = await self._ai_client.get_embeddings(list(expanded.probes))
+        probes = [
+            RetrievalProbe(query=query, embedding=vector)
+            for query, vector in zip(expanded.probes, vectors, strict=True)
+        ]
+        logger.debug("Retrieving for %d probes: %s", len(probes), [p.query for p in probes])
+        return probes
+
     async def _retrieve_evidence(
         self,
-        query_embedding: Sequence[float],
+        probes: Sequence[RetrievalProbe],
         character_name: str,
     ) -> ArchiveEvidence:
         """Найти каждый уровень отдельно, применяя его собственный бюджет и порог."""
         return ArchiveEvidence(
-            official=await self._retrieve(query_embedding, SourceType.OFFICIAL),
-            graffiti=await self._retrieve(query_embedding, SourceType.GRAFFITI),
+            official=await self._retrieve(probes, SourceType.OFFICIAL),
+            graffiti=await self._retrieve(probes, SourceType.GRAFFITI),
             voice=await self._retrieve(
-                query_embedding,
+                probes,
                 SourceType.VOICE,
                 character_name=character_name,
             ),
@@ -145,23 +176,55 @@ class RAGService:
 
     async def _retrieve(
         self,
-        query_embedding: Sequence[float],
+        probes: Sequence[RetrievalProbe],
         source_type: SourceType,
         *,
         character_name: str | None = None,
     ) -> list[RetrievedChunk]:
-        """Найти один уровень и отбросить совпадения, слишком далёкие для доказательств."""
+        """Найти один уровень и отбросить совпадения, слишком далёкие для доказательств.
+
+        Каждая формулировка ищется отдельно, а найденное сливается по близости: запись
+        занимает место в бюджете уровня, если её принесла хотя бы одна формулировка, и
+        сохраняет близость той из них, для которой она оказалась ближе всего. Формулировки
+        перебираются по порядку, поэтому при равной близости в бюджет попадает находка
+        более ранней из них, а исходный вопрос идёт первым.
+        """
         policy = self._policy.for_tier(source_type)
         if not policy.is_enabled:
             return []
 
-        matches = await self._lore_chunks.search_similar_chunks(
-            query_embedding,
-            limit=policy.limit,
-            source_types=[source_type],
-            character_name=character_name,
-        )
-        return [match for match in matches if match.similarity >= policy.min_similarity]
+        fused: dict[str, RetrievedChunk] = {}
+        for probe in probes:
+            matches = await self._lore_chunks.search_similar_chunks(
+                probe.embedding,
+                limit=policy.limit,
+                source_types=[source_type],
+                character_name=character_name,
+            )
+            self._fuse(fused, matches, min_similarity=policy.min_similarity)
+
+        ranked = sorted(fused.values(), key=lambda match: match.similarity, reverse=True)
+        return ranked[: policy.limit]
+
+    @staticmethod
+    def _fuse(
+        fused: dict[str, RetrievedChunk],
+        matches: Sequence[RetrievedChunk],
+        *,
+        min_similarity: float,
+    ) -> None:
+        """Добавить выдачу одной формулировки, оставив у записи её лучшую близость.
+
+        Ключ слияния — хэш содержимого: это и есть тождество записи в архиве, по нему
+        же ингестинг решает, что уже загружено, так что одна и та же запись, найденная
+        двумя формулировками, не занимает два места в бюджете уровня.
+        """
+        for match in matches:
+            if match.similarity < min_similarity:
+                continue
+            best = fused.get(match.chunk.content_hash)
+            if best is None or match.similarity > best.similarity:
+                fused[match.chunk.content_hash] = match
 
     @staticmethod
     def _build_sources(matches: Sequence[RetrievedChunk]) -> list[LoreSource]:
@@ -180,4 +243,4 @@ class RAGService:
         ]
 
 
-__all__ = ["RAGService", "RetrievalPolicy", "TierPolicy"]
+__all__ = ["RAGService", "RetrievalPolicy", "RetrievalProbe", "TierPolicy"]

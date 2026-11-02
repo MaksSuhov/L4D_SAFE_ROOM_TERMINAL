@@ -46,7 +46,7 @@ def build_chunk(
     return LoreChunk(
         id=chunk_id,
         content=content,
-        content_hash=f"hash-{chunk_id:064d}"[:64],
+        content_hash=f"{chunk_id:064x}",
         source_type=str(source_type),
         topic=str(topic),
         title=title,
