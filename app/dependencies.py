@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.database import Database
 from app.exceptions import AIServiceError
-from app.interfaces import AIClientProtocol, QueryExpanderProtocol
+from app.interfaces import AIClientProtocol, QueryExpanderProtocol, TracerProtocol
 from app.repositories import CharacterRepository, LoreChunkRepository
 from app.services import (
     ArchivePromptBuilder,
@@ -52,6 +52,14 @@ async def get_ai_client(request: Request) -> AIClientProtocol:
     return client
 
 
+async def get_tracer(request: Request) -> TracerProtocol:
+    """Вернуть трейсер, созданный жизненным циклом приложения."""
+    tracer: TracerProtocol | None = getattr(request.app.state, "tracer", None)
+    if tracer is None:
+        raise RuntimeError("Tracer is not initialised; the application lifespan did not run")
+    return tracer
+
+
 def get_character_repository(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CharacterRepository:
@@ -76,7 +84,11 @@ def get_prompt_builder() -> ArchivePromptBuilder:
     return ArchivePromptBuilder()
 
 
-def build_query_expander(ai_client: AIClientProtocol, settings: Settings) -> QueryExpanderProtocol:
+def build_query_expander(
+    ai_client: AIClientProtocol,
+    settings: Settings,
+    tracer: TracerProtocol,
+) -> QueryExpanderProtocol:
     """Собрать расширитель запроса по настройкам: HIDE или его выключенную заглушку.
 
     Отдельная функция нужна офлайн-стенду оценки: он собирает те же зависимости, что
@@ -84,15 +96,20 @@ def build_query_expander(ai_client: AIClientProtocol, settings: Settings) -> Que
     """
     if not settings.hide_enabled:
         return NoQueryExpander()
-    return HideQueryExpander(ai_client, max_questions=settings.hide_max_questions)
+    return HideQueryExpander(
+        ai_client,
+        max_questions=settings.hide_max_questions,
+        tracer=tracer,
+    )
 
 
 def get_query_expander(
     ai_client: Annotated[AIClientProtocol, Depends(get_ai_client)],
     settings: Annotated[Settings, Depends(get_settings)],
+    tracer: Annotated[TracerProtocol, Depends(get_tracer)],
 ) -> QueryExpanderProtocol:
     """Вернуть расширитель запроса, общий для всех ходов разговора."""
-    return build_query_expander(ai_client, settings)
+    return build_query_expander(ai_client, settings, tracer)
 
 
 def get_rag_service(
@@ -100,6 +117,7 @@ def get_rag_service(
     lore_chunk_repository: Annotated[LoreChunkRepository, Depends(get_lore_chunk_repository)],
     prompt_builder: Annotated[ArchivePromptBuilder, Depends(get_prompt_builder)],
     ai_client: Annotated[AIClientProtocol, Depends(get_ai_client)],
+    tracer: Annotated[TracerProtocol, Depends(get_tracer)],
     settings: Annotated[Settings, Depends(get_settings)],
     query_expander: Annotated[QueryExpanderProtocol, Depends(get_query_expander)],
 ) -> RAGService:
@@ -124,6 +142,7 @@ def get_rag_service(
             ),
         ),
         query_expander=query_expander,
+        tracer=tracer,
     )
 
 

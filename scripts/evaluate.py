@@ -24,7 +24,7 @@ from app.dependencies import build_query_expander, get_rag_service
 from app.evaluation import CaseEvaluator, EvaluationReport, EvaluationService, LLMJudge, load_cases
 from app.exceptions import AIServiceError, EvaluationError
 from app.repositories import CharacterRepository, LoreChunkRepository
-from app.services import ArchivePromptBuilder, OpenAIClient
+from app.services import ArchivePromptBuilder, OpenAIClient, build_tracer
 
 logger = logging.getLogger("l4d.eval")
 
@@ -65,6 +65,7 @@ async def evaluate(*, dataset: Path, limit: int) -> EvaluationReport:
 
     client = OpenAIClient(settings)
     database = Database(settings)
+    tracer = build_tracer(settings)
     try:
         async with database.session() as session:
             rag_service = get_rag_service(
@@ -72,8 +73,9 @@ async def evaluate(*, dataset: Path, limit: int) -> EvaluationReport:
                 LoreChunkRepository(session),
                 ArchivePromptBuilder(),
                 client,
+                tracer,
                 settings,
-                build_query_expander(client, settings),
+                build_query_expander(client, settings, tracer),
             )
             evaluator = CaseEvaluator(
                 context_builder=rag_service,
@@ -82,6 +84,10 @@ async def evaluate(*, dataset: Path, limit: int) -> EvaluationReport:
             )
             return await EvaluationService(evaluator).run(cases)
     finally:
+        # The process exits as soon as this returns, so the tracer has to be drained
+        # here: batching would otherwise drop the whole run on the floor.
+        tracer.flush()
+        tracer.shutdown()
         await database.dispose()
         await client.aclose()
 

@@ -1,7 +1,7 @@
 """Точка входа приложения.
 
-Модуль связывает слои: создаёт общую инфраструктуру (движок, AI-клиент) на
-протяжении жизненного цикла, регистрирует роутеры и переводит доменные
+Модуль связывает слои: создаёт общую инфраструктуру (движок, AI-клиент, трейсер)
+на протяжении жизненного цикла, регистрирует роутеры и переводит доменные
 исключения в HTTP-ответы.
 """
 
@@ -19,7 +19,7 @@ from app.config import Settings, get_settings
 from app.database import Database
 from app.exceptions import AIServiceError, ResourceNotFoundError
 from app.routers import router as api_router
-from app.services import OpenAIClient
+from app.services import OpenAIClient, build_tracer
 
 DESCRIPTION: str = (
     "Интерактивный терминал убежища из Left 4 Dead. Образы выживших отвечают на "
@@ -34,18 +34,24 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
     database = Database(settings)
     ai_client = OpenAIClient(settings)
+    tracer = build_tracer(settings)
 
     if settings.auto_create_tables:
         await database.create_all()
 
     application.state.database = database
     application.state.ai_client = ai_client
+    application.state.tracer = tracer
 
     try:
         yield
     finally:
         await ai_client.aclose()
         await database.dispose()
+        # The tracer batches observations, so the last few seconds of traces exist
+        # only until the queue is drained; a shutdown that skips this loses them.
+        tracer.flush()
+        tracer.shutdown()
 
 
 async def handle_resource_not_found(request: Request, exc: Exception) -> JSONResponse:
