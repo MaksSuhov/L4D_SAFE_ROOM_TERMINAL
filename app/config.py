@@ -30,6 +30,29 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
+    # --- Observability (Langfuse) -----------------------------------------
+    # Tracing is opt-in through the credentials: without a key pair the terminal
+    # builds the no-op tracer and nothing leaves the process. The field names
+    # match the environment names, so LANGFUSE_* in .env needs no extra wiring.
+    langfuse_public_key: str = Field(
+        default="",
+        repr=False,
+        description="Публичный ключ проекта Langfuse; пара ключей включает трейсинг.",
+    )
+    langfuse_secret_key: str = Field(
+        default="",
+        repr=False,
+        description="Секретный ключ проекта Langfuse.",
+    )
+    langfuse_base_url: str = Field(
+        default="https://cloud.langfuse.com",
+        description="Адрес Langfuse API; своя инсталляция указывает свой.",
+    )
+    langfuse_enabled: bool = Field(
+        default=True,
+        description="Выключатель наблюдаемости: false — работать с no-op трейсером.",
+    )
+
     # --- Application -----------------------------------------------------
     app_name: str = "Left 4 Dead Interactive Safe-Room Terminal"
     app_version: str = "0.1.0"
@@ -221,6 +244,11 @@ class Settings(BaseSettings):
     def is_ai_configured(self) -> bool:
         """Есть ли API-ключ; проверяется до создания клиента."""
         return bool(self.ai_api_key.strip())
+
+    @property
+    def is_langfuse_configured(self) -> bool:
+        """Есть ли пара ключей Langfuse; проверяется до создания трейсера."""
+        return bool(self.langfuse_public_key.strip() and self.langfuse_secret_key.strip())
 
 
 @lru_cache(maxsize=1)
