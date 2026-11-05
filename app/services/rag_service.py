@@ -12,10 +12,12 @@ from app.interfaces import (
     PreparedChat,
     QueryExpanderProtocol,
     RetrievedChunk,
+    TracerProtocol,
 )
 from app.schemas import ChatResponse, LoreSource
 from app.services.prompt_builder import ArchiveEvidence, ArchivePromptBuilder
 from app.services.query_expander import NoQueryExpander
+from app.services.tracing import NoOpTracer
 from app.taxonomy import SourceType
 
 logger = logging.getLogger("l4d.rag")
@@ -92,6 +94,7 @@ class RAGService:
         *,
         policy: RetrievalPolicy | None = None,
         query_expander: QueryExpanderProtocol | None = None,
+        tracer: TracerProtocol | None = None,
     ) -> None:
         self._characters = character_repository
         self._lore_chunks = lore_chunk_repository
@@ -99,17 +102,25 @@ class RAGService:
         self._ai_client = ai_client
         self._policy = policy or RetrievalPolicy()
         self._query_expander = query_expander or NoQueryExpander()
+        self._tracer = tracer or NoOpTracer()
 
     async def process_chat_message(self, character_id: int, user_message: str) -> ChatResponse:
         """Ответить на ``user_message`` от лица персонажа с ``character_id``."""
-        prepared = await self.build_chat_context(character_id, user_message)
+        with self._tracer.span("chat") as span:
+            prepared = await self.build_chat_context(character_id, user_message)
 
-        answer = await self._ai_client.generate_response(
-            system_prompt=prepared.system_prompt,
-            context=prepared.context,
-            user_message=user_message,
-            few_shot_examples=prepared.few_shot_examples,
-        )
+            answer = await self._ai_client.generate_response(
+                system_prompt=prepared.system_prompt,
+                context=prepared.context,
+                user_message=user_message,
+                few_shot_examples=prepared.few_shot_examples,
+            )
+
+            span.annotate(
+                input={"character_id": character_id, "message": user_message},
+                output=answer,
+                metadata={"character_id": character_id},
+            )
 
         return ChatResponse(
             character_id=prepared.character_id,
@@ -164,15 +175,38 @@ class RAGService:
         character_name: str,
     ) -> ArchiveEvidence:
         """Найти каждый уровень отдельно, применяя его собственный бюджет и порог."""
-        return ArchiveEvidence(
-            official=await self._retrieve(probes, SourceType.OFFICIAL),
-            graffiti=await self._retrieve(probes, SourceType.GRAFFITI),
-            voice=await self._retrieve(
-                probes,
-                SourceType.VOICE,
-                character_name=character_name,
-            ),
-        )
+        with self._tracer.span("retrieve", as_type="retriever") as span:
+            evidence = ArchiveEvidence(
+                official=await self._retrieve(probes, SourceType.OFFICIAL),
+                graffiti=await self._retrieve(probes, SourceType.GRAFFITI),
+                voice=await self._retrieve(
+                    probes,
+                    SourceType.VOICE,
+                    character_name=character_name,
+                ),
+            )
+            span.annotate(metadata=self._evidence_metadata(probes, evidence))
+
+        return evidence
+
+    @staticmethod
+    def _evidence_metadata(
+        probes: Sequence[RetrievalProbe],
+        evidence: ArchiveEvidence,
+    ) -> dict[str, object]:
+        """Собрать находки для трейса: поисковые формулировки и пары «id, близость»."""
+        return {
+            "probes": [probe.query for probe in probes],
+            "official": [
+                (match.chunk.id, round(match.similarity, 3)) for match in evidence.official
+            ],
+            "graffiti": [
+                (match.chunk.id, round(match.similarity, 3)) for match in evidence.graffiti
+            ],
+            "voice": [
+                (match.chunk.id, round(match.similarity, 3)) for match in evidence.voice
+            ],
+        }
 
     async def _retrieve(
         self,

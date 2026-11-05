@@ -4,8 +4,9 @@ import logging
 import re
 
 from app.exceptions import AIServiceError
-from app.interfaces import AIClientProtocol, ExpandedQuery, QueryExpanderProtocol
+from app.interfaces import AIClientProtocol, ExpandedQuery, QueryExpanderProtocol, TracerProtocol
 from app.services.json_array import extract_json_array
+from app.services.tracing import NoOpTracer
 
 logger = logging.getLogger("l4d.hide")
 
@@ -75,9 +76,16 @@ class HideQueryExpander(QueryExpanderProtocol):
     оставляют поиск по исходному вопросу.
     """
 
-    def __init__(self, ai_client: AIClientProtocol, *, max_questions: int = 4) -> None:
+    def __init__(
+        self,
+        ai_client: AIClientProtocol,
+        *,
+        max_questions: int = 4,
+        tracer: TracerProtocol | None = None,
+    ) -> None:
         self._ai_client = ai_client
         self._max_questions = max_questions
+        self._tracer = tracer or NoOpTracer()
         self._system_prompt = HIDE_SYSTEM_PROMPT.format(max_probes=max_questions)
 
     async def expand(self, question: str) -> ExpandedQuery:
@@ -85,16 +93,20 @@ class HideQueryExpander(QueryExpanderProtocol):
         if self._max_questions <= 0 or len(question.split()) < MIN_WORDS_FOR_EXPANSION:
             return ExpandedQuery(original=question)
 
-        try:
-            reply = await self._ai_client.complete(
-                self._system_prompt,
-                question,
-                temperature=0.0,
-            )
-            hypotheticals = self._parse(question, reply)
-        except AIServiceError as error:
-            logger.warning("HIDE expansion failed, searching the question as asked: %s", error)
-            return ExpandedQuery(original=question)
+        with self._tracer.span("hide-expand") as span:
+            try:
+                reply = await self._ai_client.complete(
+                    self._system_prompt,
+                    question,
+                    temperature=0.0,
+                )
+                hypotheticals = self._parse(question, reply)
+            except AIServiceError as error:
+                logger.warning("HIDE expansion failed, searching the question as asked: %s", error)
+                span.annotate(input=question, output=())
+                return ExpandedQuery(original=question)
+
+            span.annotate(input=question, output=hypotheticals)
 
         logger.debug("HIDE extended the question with %d probes", len(hypotheticals))
         return ExpandedQuery(original=question, hypotheticals=hypotheticals)

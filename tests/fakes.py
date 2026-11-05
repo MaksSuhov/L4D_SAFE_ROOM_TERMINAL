@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from contextlib import AbstractContextManager, nullcontext
+from typing import Any
 
 from app.interfaces import ExpandedQuery, RetrievedChunk
 from app.models import Character, LoreChunk
@@ -308,3 +310,73 @@ class FakeClock:
         current = self._now
         self._now += self._step
         return current
+
+
+class RecordingSpan:
+    """Участок трейсера-двойника: запоминает, чем его разметили."""
+
+    def __init__(self) -> None:
+        self.annotations: list[dict[str, Any]] = []
+
+    def annotate(
+        self,
+        *,
+        input: Any = None,
+        output: Any = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Запомнить разметку участка."""
+        self.annotations.append({"input": input, "output": output, "metadata": metadata})
+
+    @property
+    def output(self) -> Any:
+        """Выход последней разметки, если она была."""
+        return self.annotations[-1]["output"] if self.annotations else None
+
+    @property
+    def metadata(self) -> Mapping[str, Any]:
+        """Метаданные последней разметки; пустой словарь, если разметки не было."""
+        if not self.annotations:
+            return {}
+        last: Mapping[str, Any] | None = self.annotations[-1]["metadata"]
+        return last or {}
+
+
+class RecordingTracer:
+    """Трейсер-двойник: запоминает открытые участки, чтобы тест их проверил.
+
+    Он доказывает, что сервисы зависят от порта, а не от SDK наблюдаемости:
+    конвейер размечается ровно так же, как с настоящим трейсером, но без сети.
+    """
+
+    def __init__(self) -> None:
+        self.spans: list[tuple[str, str, RecordingSpan]] = []
+
+    def span(
+        self,
+        name: str,
+        *,
+        as_type: str = "span",
+    ) -> AbstractContextManager[RecordingSpan]:
+        """Открыть участок и запомнить его имя вместе с типом."""
+        span = RecordingSpan()
+        self.spans.append((name, as_type, span))
+        return nullcontext(span)
+
+    def flush(self) -> None:
+        """Двойнику нечего отправлять."""
+
+    def shutdown(self) -> None:
+        """Двойнику нечего освобождать."""
+
+    @property
+    def names(self) -> list[str]:
+        """Имена открытых участков в порядке открытия."""
+        return [name for name, _, _ in self.spans]
+
+    def named(self, name: str) -> RecordingSpan:
+        """Вернуть последний открытый участок с таким именем."""
+        for span_name, _, span in reversed(self.spans):
+            if span_name == name:
+                return span
+        raise AssertionError(f"no span named {name!r}")
