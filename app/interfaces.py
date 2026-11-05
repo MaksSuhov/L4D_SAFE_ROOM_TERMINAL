@@ -9,8 +9,9 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import NamedTuple, Protocol
+from typing import Any, NamedTuple, Protocol
 
 from app.models import Character, LoreChunk
 from app.schemas import EmbeddedLoreChunk, LoreSource
@@ -195,4 +196,51 @@ class QueryExpanderProtocol(Protocol):
 
     async def expand(self, question: str) -> ExpandedQuery:
         """Развернуть ``question`` в формулировки, по которым пойдёт поиск."""
+        ...
+
+
+class TracingSpanProtocol(Protocol):
+    """Один участок конвейера, как его видит система наблюдаемости.
+
+    Сервис открывает участок и прикладывает к нему то, чего не видно из имени:
+    что пришло на вход, что получилось на выходе, какие записи архива нашлись.
+    Ничего из этого не обязательно — выключенный трейсер всё принимает и
+    отбрасывает.
+    """
+
+    def annotate(
+        self,
+        *,
+        input: Any = None,
+        output: Any = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Дописать к участку его вход, выход и подробности."""
+        ...
+
+
+class TracerProtocol(Protocol):
+    """Размечает конвейер участками, которые потом видно в трейсе.
+
+    Сервисы зависят от этого порта, а не от SDK наблюдаемости: так трейсинг
+    остаётся деталью адаптера, выключается одной настройкой и не тянет внешний
+    сервис в тесты. Владение клиентом тоже здесь — освобождает его тот, кто
+    собрал граф зависимостей.
+    """
+
+    def span(
+        self,
+        name: str,
+        *,
+        as_type: str = "span",
+    ) -> AbstractContextManager[TracingSpanProtocol]:
+        """Открыть участок ``name``; закрывается на выходе из блока."""
+        ...
+
+    def flush(self) -> None:
+        """Дождаться, пока накопленные участки уедут в хранилище."""
+        ...
+
+    def shutdown(self) -> None:
+        """Освободить ресурсы трейсера."""
         ...
