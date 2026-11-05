@@ -5,7 +5,8 @@ import logging
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from openai import AsyncOpenAI, OpenAIError
+from langfuse.openai import AsyncOpenAI
+from openai import OpenAIError
 
 from app.config import Settings
 from app.exceptions import AIServiceError
