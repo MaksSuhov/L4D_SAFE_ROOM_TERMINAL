@@ -1,6 +1,6 @@
 # Safe-Room Terminal — единая точка входа для разработки.
 #
-# make dev          # Postgres + seed + бэкенд + фронтенд одной командой
+# make dev          # Qdrant + seed + бэкенд + фронтенд одной командой
 # make help         # список всех целей
 
 SHELL := /bin/bash
@@ -10,9 +10,9 @@ PYTHON := .venv/bin/python
 PIP := .venv/bin/pip
 FRONTEND := frontend
 
-.PHONY: help install install-python install-frontend db db-down seed seed-reset \
-	reingest corpus-refresh corpus-translate assets dev dev-backend dev-frontend test lint typecheck \
-	eval check build clean
+.PHONY: help install install-python install-frontend vectors vectors-down seed seed-reset \
+	reingest import-lore-csv corpus-refresh corpus-translate assets dev dev-backend dev-frontend \
+	test lint typecheck eval check build clean
 
 help: ## Показать доступные команды
 	@printf '\nSafe-Room Terminal\n\n'
@@ -30,22 +30,25 @@ install-python: ## Создать .venv и поставить зависимос
 install-frontend: ## Установить зависимости фронтенда
 	npm --prefix $(FRONTEND) install
 
-db: ## Поднять PostgreSQL 16 + pgvector в Docker
-	docker compose up -d postgres
+vectors: ## Поднять Qdrant в Docker (векторы и образы живут здесь)
+	docker compose up -d qdrant
 
-db-down: ## Остановить контейнер базы (данные сохраняются в томе)
+vectors-down: ## Остановить векторный узел (данные сохраняются в томе)
 	docker compose down
 
-seed: ## Наполнить базу: персонажи + корпус из снимка (идемпотентно)
+seed: ## Наполнить хранилище: образы + корпус из снимка (идемпотентно)
 	$(PYTHON) seed.py
 
-seed-reset: ## Пересоздать схему и наполнить базу заново
+seed-reset: ## Пересоздать коллекции и наполнить хранилище заново
 	$(PYTHON) seed.py --reset
 
 reingest: ## Переиндексировать архив: очистить lore_chunks и залить снимок заново
 	$(PYTHON) seed.py --reingest
 
-corpus-refresh: ## Перечитать вики и пересобрать снимок корпуса (без базы)
+import-lore-csv: ## Перенести архив из выгрузки pgvector в Qdrant (без повторных эмбеддингов)
+	$(PYTHON) -m scripts.import_lore_csv
+
+corpus-refresh: ## Перечитать вики и пересобрать снимок корпуса (без хранилища)
 	$(PYTHON) seed.py --refresh --corpus-only
 
 corpus-translate: ## То же плюс нормализация языка корпуса (долго, платно; нужно только для нерусского источника)
@@ -54,10 +57,10 @@ corpus-translate: ## То же плюс нормализация языка ко
 assets: ## Пересобрать ассеты интерфейса: портреты выживших, фон и знак из вики
 	$(PYTHON) scripts/fetch_brand_assets.py
 
-dev: ## Запустить весь проект: база, seed, бэкенд (:8000) и фронтенд (:5173)
+dev: ## Запустить весь проект: Qdrant, seed, бэкенд (:8000) и фронтенд (:5173)
 	./scripts/dev.sh
 
-dev-backend: ## Запустить только бэкенд (база должна быть поднята)
+dev-backend: ## Запустить только бэкенд (Qdrant должен быть поднят и наполнен)
 	.venv/bin/uvicorn app.main:app --reload
 
 dev-frontend: ## Запустить только фронтенд
@@ -66,7 +69,7 @@ dev-frontend: ## Запустить только фронтенд
 test: ## Прогнать тесты бэкенда
 	$(PYTHON) -m pytest
 
-eval: ## Оценить качество ответов LLM-судьёй (нужны поднятая база, корпус и AI_API_KEY)
+eval: ## Оценить качество ответов LLM-судьёй (нужны поднятый Qdrant, корпус и AI_API_KEY)
 	$(PYTHON) -m scripts.evaluate
 
 lint: ## Проверить код линтером ruff

@@ -2,11 +2,11 @@
 #
 # Development orchestrator for the Safe-Room Terminal monorepo.
 #
-#   ./scripts/dev.sh [--no-seed] [--no-db] [--no-frontend] [--no-backend]
+#   ./scripts/dev.sh [--no-seed] [--no-vectors] [--no-frontend] [--no-backend]
 #
-# Brings up PostgreSQL (Docker), applies the demo data when the database is
-# empty, then runs the FastAPI backend and the Vite dev server side by side with
-# prefixed logs. Ctrl+C stops both processes; PostgreSQL keeps running.
+# Brings up Qdrant (Docker), applies the demo data when the store is empty, then
+# runs the FastAPI backend and the Vite dev server side by side with prefixed
+# logs. Ctrl+C stops both processes; Qdrant keeps running.
 #
 # Ports: BACKEND_PORT (8000), FRONTEND_PORT (5173).
 
@@ -17,11 +17,11 @@ cd "$ROOT_DIR"
 
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
-COMPOSE_SERVICE="postgres"
-DB_WAIT_TIMEOUT_SECONDS=60
+COMPOSE_SERVICE="qdrant"
+STORE_WAIT_TIMEOUT_SECONDS=60
 
 RUN_SEED=1
-RUN_DB=1
+RUN_VECTORS=1
 RUN_BACKEND=1
 RUN_FRONTEND=1
 
@@ -54,7 +54,7 @@ parse_arguments() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --no-seed) RUN_SEED=0 ;;
-      --no-db) RUN_DB=0 ;;
+      --no-vectors) RUN_VECTORS=0 ;;
       --no-backend) RUN_BACKEND=0 ;;
       --no-frontend) RUN_FRONTEND=0 ;;
       -h | --help)
@@ -153,37 +153,37 @@ stop_services() {
 
 finish() {
   stop_services
-  log "PostgreSQL оставлен запущенным. Остановить: make db-down"
+  log "Qdrant оставлен запущенным. Остановить: make vectors-down"
 }
 
 # --- steps -----------------------------------------------------------------
-start_database() {
-  log "Поднимаю PostgreSQL + pgvector…"
+start_vector_store() {
+  log "Поднимаю Qdrant…"
   docker compose up -d "$COMPOSE_SERVICE" >/dev/null
-  wait_for_database
+  wait_for_vector_store
 }
 
-wait_for_database() {
+wait_for_vector_store() {
   local container
   local waited=0
 
-  while [ "$waited" -lt "$DB_WAIT_TIMEOUT_SECONDS" ]; do
+  while [ "$waited" -lt "$STORE_WAIT_TIMEOUT_SECONDS" ]; do
     container="$(docker compose ps -q "$COMPOSE_SERVICE" 2>/dev/null || true)"
     if [ -n "$container" ] &&
       [ "$(docker inspect -f '{{.State.Health.Status}}' "$container" 2>/dev/null)" = "healthy" ]; then
-      log "PostgreSQL готов (порт 5432)."
+      log "Qdrant готов (порт 6333)."
       return 0
     fi
     sleep 1
     waited=$((waited + 1))
   done
 
-  fail "PostgreSQL не стал healthy за ${DB_WAIT_TIMEOUT_SECONDS}s. Проверьте: docker compose logs $COMPOSE_SERVICE"
+  fail "Qdrant не стал healthy за ${STORE_WAIT_TIMEOUT_SECONDS}s. Проверьте: docker compose logs $COMPOSE_SERVICE"
 }
 
-seed_database() {
+seed_store() {
   log "Проверяю демо-данные (seed.py идемпотентен)…"
-  "$PYTHON" seed.py || fail "Не удалось наполнить базу. Проверьте ключ провайдера в .env."
+  "$PYTHON" seed.py || fail "Не удалось наполнить хранилище. Проверьте ключ провайдера в .env."
 }
 
 start_backend() {
@@ -233,11 +233,11 @@ main() {
 
   trap stop_services INT TERM
 
-  if [ "$RUN_DB" -eq 1 ]; then
-    start_database
+  if [ "$RUN_VECTORS" -eq 1 ]; then
+    start_vector_store
   fi
   if [ "$RUN_SEED" -eq 1 ]; then
-    seed_database
+    seed_store
   fi
   if [ "$RUN_BACKEND" -eq 1 ]; then
     start_backend
