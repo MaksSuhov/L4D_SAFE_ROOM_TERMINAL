@@ -66,6 +66,40 @@ class TestJudge:
         assert "Мутант." in request
         assert "Эталон." in request
 
+    async def test_the_answer_is_placed_after_the_reference(self) -> None:
+        """Проверить, что оцениваемый ответ идёт последним, а не первым.
+
+        Слабая модель оценивает то, что лежит рядом с вопросом; когда ответ шёл
+        первым, она нередко оценивала эталон вместо него.
+        """
+        judge, model = judge_with('{"accuracy": 1, "completeness": 1, "relevance": 1}')
+
+        await judge.evaluate(question="q", answer="ответ терминала", reference="эталон")
+
+        request = str(model.completion_calls[0]["user_message"])
+        assert request.index("эталон") < request.index("ответ терминала")
+
+    async def test_an_empty_answer_is_not_sent_to_the_model(self) -> None:
+        """Проверить, что судья не спрашивает модель про пустой ответ.
+
+        Спрошенная, она оценила бы справку рядом и выдала высокие баллы ни за что.
+        """
+        judge, model = judge_with('{"accuracy": 5, "completeness": 5, "relevance": 5}')
+
+        score = await judge.evaluate(question="q", answer="", reference="эталон")
+
+        assert (score.accuracy, score.completeness, score.relevance) == (1.0, 1.0, 1.0)
+        assert model.completion_calls == []
+
+    async def test_an_answer_without_any_words_is_not_sent_to_the_model(self) -> None:
+        """Проверить, что ответ из одних знаков препинания — тоже пустой."""
+        judge, model = judge_with('{"accuracy": 5, "completeness": 5, "relevance": 5}')
+
+        score = await judge.evaluate(question="q", answer="  ...  ", reference="эталон")
+
+        assert score.accuracy == 1.0
+        assert model.completion_calls == []
+
     async def test_a_reply_without_json_is_rejected(self) -> None:
         judge, _ = judge_with("Не могу оценить.")
 

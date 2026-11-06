@@ -10,16 +10,20 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+import pytest
+
 from app.evaluation import CaseEvaluator, EvalCase, EvaluationService
 from app.evaluation.dataset import load_cases
 from app.evaluation.domain import CaseResult, JudgeScore
 from app.evaluation.latency import measure_stream
+from app.exceptions import AIServiceError, EvaluationError
 from app.interfaces import RetrievedChunk
 from app.services import ArchivePromptBuilder, RAGService
 from app.taxonomy import SourceType
 from tests.fakes import (
     FakeAIClient,
     FakeClock,
+    FakeSimilarity,
     InMemoryCharacterRepository,
     InMemoryLoreChunkRepository,
     build_character,
@@ -60,12 +64,21 @@ class StubJudge:
 
 def build_evaluator(
     *,
-    fragments: list[str],
     judge: StubJudge,
+    fragments: list[str] | None = None,
+    sequences: list[list[str]] | None = None,
+    errors: list[Exception] | None = None,
+    similarity: FakeSimilarity | None = None,
     clock: FakeClock | None = None,
+    attempts: int = 1,
+    temperature: float | None = None,
 ) -> tuple[CaseEvaluator, FakeAIClient]:
     """Собрать настоящий конвейер RAG на заглушках и обернуть его в оценщик."""
-    model = FakeAIClient(stream_fragments=fragments)
+    model = FakeAIClient(
+        stream_fragments=fragments if fragments is not None else ["ответ"],
+        stream_sequences=sequences,
+        stream_errors=errors,
+    )
     rag_service = RAGService(
         InMemoryCharacterRepository(
             [build_character(character_id=5, name="Билл", system_prompt="Ты — Билл.")]
@@ -90,7 +103,10 @@ def build_evaluator(
         context_builder=rag_service,
         model=model,
         judge=judge,
+        similarity=similarity,
         clock=clock or FakeClock(),
+        attempts=attempts,
+        temperature=temperature,
     )
     return evaluator, model
 
@@ -125,7 +141,7 @@ class TestCaseEvaluator:
 
         result = await evaluator.evaluate(CASE)
 
-        assert result.answer_overlap.f1 == 1.0
+        assert result.lexical_overlap.f1 == 1.0
 
     async def test_scores_the_retrieved_sources(self) -> None:
         evaluator, _ = build_evaluator(fragments=["ответ"], judge=StubJudge())
@@ -134,6 +150,25 @@ class TestCaseEvaluator:
 
         assert result.source_overlap.precision == 1.0
         assert result.source_overlap.recall == 1.0
+        assert result.source_overlap.full_hit == 1.0
+
+    async def test_records_the_semantic_similarity(self) -> None:
+        similarity = FakeSimilarity(value=0.8)
+        evaluator, _ = build_evaluator(fragments=["Танк — мутант."], judge=StubJudge(),
+                                       similarity=similarity)
+
+        result = await evaluator.evaluate(CASE)
+
+        assert result.semantic_similarity == 0.8
+        assert similarity.calls == [("Танк мутант", "Танк — мутант.")]
+
+    async def test_passes_the_pinned_temperature_to_generation(self) -> None:
+        evaluator, model = build_evaluator(fragments=["ответ"], judge=StubJudge(),
+                                           temperature=0.0)
+
+        await evaluator.evaluate(CASE)
+
+        assert model.stream_temperatures == [0.0]
 
     async def test_the_pipeline_really_ran_before_generation(self) -> None:
         evaluator, model = build_evaluator(fragments=["ответ"], judge=StubJudge())
@@ -153,6 +188,36 @@ class TestCaseEvaluator:
         assert judge.calls[0]["question"] == "Кто такой Танк?"
         assert judge.calls[0]["answer"] == "Танк — мутант."
         assert judge.calls[0]["reference"] == "Танк мутант"
+
+    async def test_retries_an_empty_answer(self) -> None:
+        """Проверить, что пустая выдача провайдера не принимается за ответ."""
+        evaluator, _ = build_evaluator(
+            sequences=[[], ["Танк — мутант."]],
+            judge=StubJudge(),
+            attempts=2,
+        )
+
+        result = await evaluator.evaluate(CASE)
+
+        assert result.answer == "Танк — мутант."
+
+    async def test_retries_an_attempt_that_failed(self) -> None:
+        evaluator, _ = build_evaluator(
+            fragments=["Танк — мутант."],
+            errors=[AIServiceError("stream returned no content")],
+            judge=StubJudge(),
+            attempts=2,
+        )
+
+        result = await evaluator.evaluate(CASE)
+
+        assert result.answer == "Танк — мутант."
+
+    async def test_gives_up_after_the_attempts_run_out(self) -> None:
+        evaluator, _ = build_evaluator(sequences=[[], []], judge=StubJudge(), attempts=2)
+
+        with pytest.raises(EvaluationError, match="no answer"):
+            await evaluator.evaluate(CASE)
 
 
 class TestEvaluationService:
@@ -186,6 +251,25 @@ class TestEvaluationService:
         assert report.mean_accuracy == 0.0
         assert report.mean_total_time == 0.0
 
+    async def test_a_case_without_an_answer_becomes_a_failure(self) -> None:
+        """Проверить, что сбойный кейс попадает в отчёт, а не выпадает из него."""
+        evaluator, _ = build_evaluator(sequences=[[], []], judge=StubJudge(), attempts=2)
+
+        report = await EvaluationService(evaluator).run([CASE])
+
+        assert report.count == 0
+        assert report.failed_count == 1
+        assert report.failures[0].case.question == "Кто такой Танк?"
+
+    async def test_the_judge_is_never_asked_about_an_empty_answer(self) -> None:
+        judge = StubJudge()
+        evaluator, _ = build_evaluator(sequences=[[]], judge=judge, attempts=1)
+
+        report = await EvaluationService(evaluator).run([CASE])
+
+        assert report.failed_count == 1
+        assert judge.calls == []
+
 
 class TestEvaluationReport:
     async def test_serialises_to_a_summary_and_per_case_rows(self) -> None:
@@ -203,8 +287,10 @@ class TestEvaluationReport:
         assert isinstance(summary, dict)
         assert isinstance(cases, list)
         assert summary["count"] == 1
+        assert summary["failed"] == 0
         assert summary["timing"] == {"time_to_first_token": 1.0, "total": 2.0}
         assert len(cases) == 1
+        assert payload["failures"] == []
 
     async def test_renders_a_readable_text_report(self) -> None:
         evaluator, _ = build_evaluator(fragments=["Танк — мутант."], judge=StubJudge())
@@ -216,9 +302,19 @@ class TestEvaluationReport:
         assert "До первого токена" in text
         assert "Кто такой Танк?" in text
 
+    async def test_lists_failures_apart_from_the_means(self) -> None:
+        evaluator, _ = build_evaluator(sequences=[[]], judge=StubJudge(), attempts=1)
+        report = await EvaluationService(evaluator).run([CASE])
+
+        text = report.render_text()
+
+        assert "Сбои" in text
+        assert "Кто такой Танк?" in text
+
 
 class TestMeasureStream:
     async def test_an_empty_stream_times_the_wait_for_nothing(self) -> None:
+        """Проверить, что замер честно меряет пустоту; ошибкой её делает транспорт."""
         answer, timing = await measure_stream(empty_stream(), FakeClock(start=0.0, step=1.0))
 
         assert answer == ""

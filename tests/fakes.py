@@ -202,16 +202,23 @@ class FakeAIClient:
         *,
         answer: str = "Stay behind the wall, kids.",
         stream_fragments: Sequence[str] | None = None,
+        stream_sequences: Sequence[Sequence[str]] | None = None,
         completion: str = "{}",
+        stream_errors: Sequence[Exception] | None = None,
     ) -> None:
         self._answer = answer
         self._stream_fragments = list(stream_fragments) if stream_fragments is not None else None
+        self._stream_sequences = (
+            [list(chunk) for chunk in stream_sequences] if stream_sequences is not None else None
+        )
         self._completion = completion
+        self._stream_errors = list(stream_errors or ())
         self.embedded_texts: list[str] = []
         self.embedding_calls: list[list[str]] = []
         self.translated_texts: list[str] = []
         self.generation_calls: list[dict[str, object]] = []
         self.completion_calls: list[dict[str, object]] = []
+        self.stream_temperatures: list[float | None] = []
 
     async def get_embedding(self, text: str) -> list[float]:
         return (await self.get_embeddings([text]))[0]
@@ -241,11 +248,18 @@ class FakeAIClient:
         context: str,
         user_message: str,
         few_shot_examples: Sequence[Mapping[str, str]] | None = None,
+        *,
+        temperature: float | None = None,
     ) -> AsyncIterator[str]:
         self._record_generation(system_prompt, context, user_message, few_shot_examples)
-        fragments = self._stream_fragments
-        if fragments is None:
-            fragments = [self._answer]
+        self.stream_temperatures.append(temperature)
+        if self._stream_errors:
+            raise self._stream_errors.pop(0)
+        fragments: list[str]
+        if self._stream_sequences is not None:
+            fragments = self._stream_sequences.pop(0) if self._stream_sequences else []
+        else:
+            fragments = self._stream_fragments or [self._answer]
         for fragment in fragments:
             yield fragment
 
@@ -292,6 +306,18 @@ class FakeQueryExpander:
     async def expand(self, question: str) -> ExpandedQuery:
         self.questions.append(question)
         return ExpandedQuery(original=question, hypotheticals=self._hypotheticals)
+
+
+class FakeSimilarity:
+    """Близость ответа и эталона, заданная числом: без модели эмбеддингов."""
+
+    def __init__(self, value: float = 0.0) -> None:
+        self._value = value
+        self.calls: list[tuple[str, str]] = []
+
+    async def similarity(self, reference: str, answer: str) -> float:
+        self.calls.append((reference, answer))
+        return self._value
 
 
 class FakeClock:

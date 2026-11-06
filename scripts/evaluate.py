@@ -21,7 +21,14 @@ from pathlib import Path
 from app.config import Settings, get_settings
 from app.database import Database
 from app.dependencies import build_query_expander, get_rag_service
-from app.evaluation import CaseEvaluator, EvaluationReport, EvaluationService, LLMJudge, load_cases
+from app.evaluation import (
+    CaseEvaluator,
+    EmbeddingSimilarity,
+    EvaluationReport,
+    EvaluationService,
+    LLMJudge,
+    load_cases,
+)
 from app.exceptions import AIServiceError, EvaluationError
 from app.repositories import CharacterRepository, LoreChunkRepository
 from app.services import ArchivePromptBuilder, OpenAIClient, build_tracer
@@ -53,8 +60,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-async def evaluate(*, dataset: Path, limit: int) -> EvaluationReport:
-    """Прогнать датасет через реальный пайплайн и вернуть отчёт."""
+async def evaluate(*, dataset: Path, limit: int) -> tuple[EvaluationReport, dict[str, object]]:
+    """Прогнать датасет через реальный пайплайн и вернуть отчёт с настройками прогона."""
     settings: Settings = get_settings()
 
     cases = load_cases(dataset)
@@ -81,8 +88,11 @@ async def evaluate(*, dataset: Path, limit: int) -> EvaluationReport:
                 context_builder=rag_service,
                 model=client,
                 judge=LLMJudge(client),
+                similarity=EmbeddingSimilarity(client),
+                attempts=settings.eval_attempts,
+                temperature=settings.eval_temperature,
             )
-            return await EvaluationService(evaluator).run(cases)
+            report = await EvaluationService(evaluator).run(cases)
     finally:
         # The process exits as soon as this returns, so the tracer has to be drained
         # here: batching would otherwise drop the whole run on the floor.
@@ -91,12 +101,28 @@ async def evaluate(*, dataset: Path, limit: int) -> EvaluationReport:
         await database.dispose()
         await client.aclose()
 
+    config: dict[str, object] = {
+        "dataset": str(dataset),
+        "model": settings.chat_model,
+        "embedding_model": settings.embedding_model,
+        "temperature": settings.eval_temperature,
+        "attempts": settings.eval_attempts,
+        "limit": limit,
+    }
+    return report, config
 
-def write_report(path: Path, report: EvaluationReport) -> None:
-    """Записать отчёт в JSON-файл, создав каталог при необходимости."""
+
+def write_report(path: Path, report: EvaluationReport, config: dict[str, object]) -> None:
+    """Записать отчёт в JSON-файл, создав каталог при необходимости.
+
+    Настройки прогона кладутся рядом с числами: без них отчёт невозможно
+    сравнить с прошлым — непонятно, отвечала та же модель и с той же температурой
+    или числа успели разъехаться из-за конфигурации.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"config": config, **report.to_dict()}
     path.write_text(
-        json.dumps(report.to_dict(), ensure_ascii=False, indent=2),
+        json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -104,15 +130,24 @@ def write_report(path: Path, report: EvaluationReport) -> None:
 def run(arguments: argparse.Namespace) -> int:
     """Синхронная обёртка: прогнать, напечатать отчёт, записать JSON."""
     try:
-        report = asyncio.run(evaluate(dataset=arguments.dataset, limit=arguments.limit))
+        report, config = asyncio.run(
+            evaluate(dataset=arguments.dataset, limit=arguments.limit)
+        )
     except (EvaluationError, AIServiceError) as error:
         logger.error("Evaluation failed: %s", error)
         return 1
 
     print(report.render_text())
     if arguments.output is not None:
-        write_report(arguments.output, report)
+        write_report(arguments.output, report, config)
         logger.info("Report written to %s", arguments.output)
+
+    # Ненулевой код возврата при сбоях: молча отдать неполный отчёт как успешный
+    # прогон — это ровно та ошибка, из-за которой сбойный кейс раньше выглядел
+    # отличным ответом.
+    if report.failed_count:
+        logger.error("%d case(s) produced no answer; see the report", report.failed_count)
+        return 1
     return 0
 
 

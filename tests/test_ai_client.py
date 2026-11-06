@@ -142,3 +142,38 @@ class TestTranslation:
             assert await client.translate_texts([]) == []
             assert server.chat_requests() == []
             await client.aclose()
+
+
+class TestStreaming:
+    async def test_collects_the_fragments_of_a_stream(self) -> None:
+        with ProviderServer(stream_replies=["Танк — мутант"]) as server:
+            client = build_client(server)
+
+            fragments = [fragment async for fragment in client.stream_response("s", "c", "q")]
+
+            assert "".join(fragments) == "Танк — мутант"
+            await client.aclose()
+
+    async def test_a_stream_without_content_is_an_error(self) -> None:
+        """Проверить, что пустой поток падает, а не выдаёт пустой ответ.
+
+        Так провайдер отвечает при сбое; молча принять это за ответ значило бы
+        отдать игроку пустоту и записать её в стенд как настоящий ответ.
+        """
+        with ProviderServer(stream_replies=[""]) as server:
+            client = build_client(server)
+
+            with pytest.raises(AIServiceError, match="no content"):
+                async for _ in client.stream_response("s", "c", "q"):
+                    pass
+            await client.aclose()
+
+    async def test_the_temperature_override_reaches_the_provider(self) -> None:
+        with ProviderServer(stream_replies=["ок"]) as server:
+            client = build_client(server)
+
+            async for _ in client.stream_response("s", "c", "q", temperature=0.0):
+                pass
+
+            assert server.chat_requests()[-1]["payload"]["temperature"] == 0.0
+            await client.aclose()

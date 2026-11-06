@@ -119,8 +119,20 @@ class OpenAIClient(AIClientProtocol):
         context: str,
         user_message: str,
         few_shot_examples: Sequence[Mapping[str, str]] | None = None,
+        *,
+        temperature: float | None = None,
     ) -> AsyncIterator[str]:
-        """Отдавать тот же ответ, что :meth:`generate_response`, фрагмент за фрагментом."""
+        """Отдавать тот же ответ, что :meth:`generate_response`, фрагмент за фрагментом.
+
+        ``temperature`` переопределяет настройку на один вызов: стенд оценки
+        закрепляет её, чтобы прогоны были сравнимы, а боевой чат оставляет значение
+        по умолчанию.
+
+        Поток без единого фрагмента — это ошибка, а не пустой ответ: так провайдер
+        отвечает при сбое на своей стороне, и молча вернуть пустоту значило бы не
+        отдать игроку ничего, а стенду — посчитать это ответом. Проверка повторяет
+        ту, что уже стоит в :meth:`_create_completion`.
+        """
         messages = self._compose_messages(
             system_prompt, context, user_message, few_shot_examples
         )
@@ -128,19 +140,27 @@ class OpenAIClient(AIClientProtocol):
             stream = await self._client.chat.completions.create(
                 model=self._settings.chat_model,
                 messages=messages,
-                temperature=self._settings.chat_temperature,
+                temperature=(
+                    self._settings.chat_temperature if temperature is None else temperature
+                ),
                 max_tokens=self._settings.chat_max_tokens,
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
                 stream=True,
             )
         except OpenAIError as error:
             raise AIServiceError(f"Chat completion request failed: {error}") from error
 
+        produced = False
         async for chunk in stream:
             if not chunk.choices:
                 continue
             content = chunk.choices[0].delta.content
             if content:
+                produced = True
                 yield content
+
+        if not produced:
+            raise AIServiceError("Chat completion stream returned no content")
 
     async def complete(
         self,
@@ -173,6 +193,7 @@ class OpenAIClient(AIClientProtocol):
                 messages=list(messages),
                 temperature=temperature,
                 max_tokens=self._settings.chat_max_tokens,
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}}
             )
         except OpenAIError as error:
             raise AIServiceError(f"Chat completion request failed: {error}") from error

@@ -225,6 +225,30 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- Offline evaluation ----------------------------------------------
+    # The scoring stand reports numbers that only mean something if two runs of
+    # the same dataset are comparable. Generation therefore runs at a pinned
+    # temperature instead of the chat default: sampling at 0.7 made the same
+    # dataset score differently on every run.
+    eval_temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=2.0,
+        description=(
+            "Температура генерации на стенде оценки. Закреплена низкой, чтобы один и "
+            "тот же датасет давал сравнимые числа между прогонами."
+        ),
+    )
+    eval_attempts: int = Field(
+        default=2,
+        ge=1,
+        le=5,
+        description=(
+            "Сколько раз стенд повторяет кейс, если модель вернула пустой ответ или "
+            "запрос упал. Кейс, не давший ответ за все попытки, попадает в отчёт как сбой."
+        ),
+    )
+
     @field_validator("api_prefix")
     @classmethod
     def _normalise_api_prefix(cls, value: str) -> str:

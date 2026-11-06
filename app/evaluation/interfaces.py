@@ -8,8 +8,8 @@ from app.interfaces import PreparedChat
 
 
 class ClockProtocol(Protocol):
-     
-     def now(self) -> float:
+
+    def now(self) -> float:
         """Вернуть текущее время."""
         ...
 
@@ -39,9 +39,36 @@ class StreamingChatProtocol(Protocol):
         context: str,
         user_message: str,
         few_shot_examples: Sequence[Mapping[str, str]] | None = None,
+        *,
+        temperature: float | None = None,
     ) -> AsyncIterator[str]:
-        """Отдавать ответ по фрагментам по мере их появления."""
+        """Отдавать ответ по фрагментам по мере их появления.
+
+        ``temperature`` переопределяет настройку на один вызов: стенд закрепляет
+        её, чтобы прогоны были сравнимы.
+        """
         ...
+
+
+class EmbeddingProtocol(Protocol):
+    """Эмбеддинги текстов — узкий срез возможностей клиента модели.
+
+    Пакету оценки нужна ровно эта операция, поэтому порт объявляет её одну, а не
+    тянет за собой весь :class:`~app.interfaces.AIClientProtocol`.
+    """
+
+    async def get_embeddings(self, texts: Sequence[str]) -> list[list[float]]:
+        """Посчитать эмбеддинги пакета текстов, сохранив их порядок."""
+        ...
+
+
+class SimilarityProtocol(Protocol):
+    """Близость ответа к эталону одним числом от 0 до 1."""
+
+    async def similarity(self, reference: str, answer: str) -> float:
+        """Вернуть, насколько ``answer`` близок к ``reference``."""
+        ...
+
 
 
 class ContextBuilderProtocol(Protocol):

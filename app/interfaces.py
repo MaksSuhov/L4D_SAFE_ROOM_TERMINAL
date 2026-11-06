@@ -160,12 +160,16 @@ class AIClientProtocol(Protocol):
         context: str,
         user_message: str,
         few_shot_examples: Sequence[Mapping[str, str]] | None = None,
+        *,
+        temperature: float | None = None,
     ) -> AsyncIterator[str]:
         """Отдавать ответ по фрагментам, в том порядке, в котором их шлёт провайдер.
 
         Тот же ответ, что и у :meth:`generate_response`, только доставляемый потоком
         фрагментов. Стриминг делает наблюдаемым время до первого токена: пока не
-        пришёл первый фрагмент, ничего ещё не сгенерировано.
+        пришёл первый фрагмент, ничего ещё не сгенерировано. ``temperature``
+        переопределяет настройку на один вызов, ``None`` оставляет значение по
+        умолчанию.
         """
         ...
 

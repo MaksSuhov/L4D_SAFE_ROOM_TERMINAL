@@ -19,6 +19,7 @@ class _Handler(BaseHTTPRequestHandler):
     requests: list[dict[str, Any]] = []
     embedding_dimensions: int = 3
     chat_replies: list[str] = []
+    stream_replies: list[str] = []
     drop_last_embedding: bool = False
 
     def do_POST(self) -> None:  # noqa: N802 - name mandated by BaseHTTPRequestHandler
@@ -28,6 +29,9 @@ class _Handler(BaseHTTPRequestHandler):
 
         if self.path.endswith("/embeddings"):
             body = self._embeddings(payload)
+        elif self.path.endswith("/chat/completions") and payload.get("stream"):
+            self._stream_chat(payload)
+            return
         elif self.path.endswith("/chat/completions"):
             body = self._chat(payload)
         else:
@@ -41,6 +45,36 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
         self.wfile.write(encoded)
+
+    def _stream_chat(self, payload: dict[str, Any]) -> None:
+        """Отдать ответ потоком событий SSE — так же, как это делает провайдер.
+
+        Пустая строка в очереди даёт поток из одного ``[DONE]``: именно такой
+        ответ приходит при сбое на стороне провайдера, и адаптер обязан увидеть в
+        нём ошибку, а не пустой ответ.
+        """
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+
+        replies = type(self).stream_replies
+        content = replies.pop(0) if replies else ""
+        events: list[dict[str, Any]] = []
+        if content:
+            events.append(
+                {
+                    "id": "chatcmpl-stub",
+                    "object": "chat.completion.chunk",
+                    "created": 0,
+                    "model": payload.get("model", "stub"),
+                    "choices": [{"index": 0, "delta": {"content": content}}],
+                }
+            )
+        body = "".join(f"data: {json.dumps(event)}\n\n" for event in events)
+        self.wfile.write((body + "data: [DONE]\n\n").encode())
 
     def _embeddings(self, payload: dict[str, Any]) -> dict[str, Any]:
         sent = payload.get("input", "")
@@ -91,11 +125,13 @@ class ProviderServer:
         *,
         embedding_dimensions: int = 3,
         chat_replies: list[str] | None = None,
+        stream_replies: list[str] | None = None,
         drop_last_embedding: bool = False,
     ) -> None:
         _Handler.requests = []
         _Handler.embedding_dimensions = embedding_dimensions
         _Handler.chat_replies = list(chat_replies or [])
+        _Handler.stream_replies = list(stream_replies or [])
         _Handler.drop_last_embedding = drop_last_embedding
 
         self._host = "127.0.0.1"
