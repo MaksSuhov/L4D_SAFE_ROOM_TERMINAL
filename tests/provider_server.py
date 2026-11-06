@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -18,6 +19,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     requests: list[dict[str, Any]] = []
     embedding_dimensions: int = 3
+    embedding_encoder: Callable[[str], list[float]] | None = None
     chat_replies: list[str] = []
     stream_replies: list[str] = []
     drop_last_embedding: bool = False
@@ -79,11 +81,14 @@ class _Handler(BaseHTTPRequestHandler):
     def _embeddings(self, payload: dict[str, Any]) -> dict[str, Any]:
         sent = payload.get("input", "")
         texts = sent if isinstance(sent, list) else [sent]
+        encoder = type(self).embedding_encoder
         data = [
             {
                 "object": "embedding",
                 "index": index,
-                "embedding": self._vector(str(text), index),
+                "embedding": (
+                    encoder(str(text)) if encoder is not None else self._vector(str(text), index)
+                ),
             }
             for index, text in enumerate(texts)
         ]
@@ -124,12 +129,18 @@ class ProviderServer:
         self,
         *,
         embedding_dimensions: int = 3,
+        embedding_encoder: Callable[[str], list[float]] | None = None,
         chat_replies: list[str] | None = None,
         stream_replies: list[str] | None = None,
         drop_last_embedding: bool = False,
     ) -> None:
         _Handler.requests = []
         _Handler.embedding_dimensions = embedding_dimensions
+        # An encoder that maps text onto meaningful axes lets a test make retrieval
+        # deterministic without a model: it decides what is close to what, so the
+        # expected archives of a query are a property of the corpus, not of a
+        # provider's whim.
+        _Handler.embedding_encoder = embedding_encoder
         _Handler.chat_replies = list(chat_replies or [])
         _Handler.stream_replies = list(stream_replies or [])
         _Handler.drop_last_embedding = drop_last_embedding

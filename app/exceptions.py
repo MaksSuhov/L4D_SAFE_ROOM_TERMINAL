@@ -31,5 +31,11 @@ class AIServiceError(ApplicationError):
     """Поднимается, когда провайдер OpenAI даёт сбой или настроен неверно."""
 
 
+class VectorStoreError(ApplicationError):
+    """Поднимается, когда векторное хранилище недоступно или отвечает не тем,
+    что объявляет его схема.
+    """
+
+
 class EvaluationError(ApplicationError):
     """Поднимается, когда стенд оценки не может прочитать кейс или оценить ответ."""

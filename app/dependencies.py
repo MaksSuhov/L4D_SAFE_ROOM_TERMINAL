@@ -1,23 +1,30 @@
 """Провайдеры внедрения зависимостей для слоя API.
 
 Здесь строится каждый объект, нужный роутерам, и внедряется через ``Depends``:
-сессия живёт на протяжении запроса, репозитории привязаны к этой сессии, а
-RAG-сервис получает те абстракции, которые объявляет.
+клиент хранилища и репозитории живут столько же, сколько процесс, а RAG-сервис
+получает те абстракции, которые объявляет.
+
+Собирающие функции отделены от провайдеров ``Depends`` намеренно: офлайн-стенд
+оценки строит те же зависимости без графа FastAPI, и общий код гарантирует, что
+он оценивает боевой конвейер, а не его копию.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends, Request
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
-from app.database import Database
 from app.exceptions import AIServiceError
-from app.interfaces import AIClientProtocol, QueryExpanderProtocol, TracerProtocol
-from app.repositories import CharacterRepository, LoreChunkRepository
+from app.interfaces import (
+    AIClientProtocol,
+    CharacterRepositoryProtocol,
+    LoreChunkRepositoryProtocol,
+    QueryExpanderProtocol,
+    TracerProtocol,
+)
 from app.services import (
     ArchivePromptBuilder,
     HideQueryExpander,
@@ -26,22 +33,99 @@ from app.services import (
     RetrievalPolicy,
     TierPolicy,
 )
+from app.vector import (
+    Bm25Encoder,
+    QdrantCharacterRepository,
+    QdrantLoreChunkRepository,
+    SparseEncoderProtocol,
+    VectorStore,
+)
 
 
-async def get_database(request: Request) -> Database:
-    """Вернуть дескриптор базы, созданный жизненным циклом приложения."""
-    database: Database | None = getattr(request.app.state, "database", None)
-    if database is None:
-        raise RuntimeError("Database is not initialised; the application lifespan did not run")
-    return database
+async def get_vector_store(request: Request) -> VectorStore:
+    """Вернуть хранилище, созданное жизненным циклом приложения."""
+    store: VectorStore | None = getattr(request.app.state, "vector_store", None)
+    if store is None:
+        raise RuntimeError("Vector store is not initialised; the application lifespan did not run")
+    return store
 
 
-async def get_session(
-    database: Annotated[Database, Depends(get_database)],
-) -> AsyncIterator[AsyncSession]:
-    """Отдать сессию в пределах запроса и закрыть её после формирования ответа."""
-    async with database.session() as session:
-        yield session
+@lru_cache(maxsize=1)
+def _cached_sparse_encoder(model_name: str, language: str) -> Bm25Encoder:
+    """Собрать энкодер BM25 ровно один раз на процесс."""
+    return Bm25Encoder(model_name, language=language)
+
+
+def build_sparse_encoder(settings: Settings) -> SparseEncoderProtocol:
+    """Вернуть энкодер BM25, общий для всего процесса.
+
+    Кэш ключуется строками, а не объектом настроек, потому что ``Settings``
+    неизменяем, но не хешируем: адресом ключа служит то, что действительно
+    отличает один энкодер от другого, — модель и её язык.
+    """
+    return _cached_sparse_encoder(
+        settings.sparse_embedding_model,
+        settings.sparse_embedding_language,
+    )
+
+
+def build_character_repository(store: VectorStore) -> QdrantCharacterRepository:
+    """Собрать репозиторий образов выживших поверх хранилища."""
+    return QdrantCharacterRepository(store.client, store.character_collection)
+
+
+def build_lore_chunk_repository(
+    store: VectorStore,
+    sparse_encoder: SparseEncoderProtocol,
+    settings: Settings,
+) -> QdrantLoreChunkRepository:
+    """Собрать репозиторий лора вместе с настройками его гибридного поиска."""
+    return QdrantLoreChunkRepository(
+        store.client,
+        store.lore_collection,
+        sparse_encoder,
+        hybrid_enabled=settings.rag_hybrid_enabled,
+        prefetch_multiplier=settings.rag_prefetch_multiplier,
+    )
+
+
+def build_retrieval_policy(settings: Settings) -> RetrievalPolicy:
+    """Собрать бюджет и пороги уровней доказательств из конфигурации."""
+    return RetrievalPolicy(
+        official=TierPolicy(
+            limit=settings.rag_official_top_k,
+            min_similarity=settings.rag_min_similarity,
+        ),
+        graffiti=TierPolicy(
+            limit=settings.rag_graffiti_top_k,
+            min_similarity=settings.rag_min_similarity,
+        ),
+        voice=TierPolicy(
+            limit=settings.rag_voice_top_k,
+            min_similarity=settings.rag_voice_min_similarity,
+        ),
+    )
+
+
+def build_rag_service(
+    character_repository: CharacterRepositoryProtocol,
+    lore_chunk_repository: LoreChunkRepositoryProtocol,
+    prompt_builder: ArchivePromptBuilder,
+    ai_client: AIClientProtocol,
+    tracer: TracerProtocol,
+    settings: Settings,
+    query_expander: QueryExpanderProtocol,
+) -> RAGService:
+    """Собрать RAG-конвейер из его зависимостей и конфигурации."""
+    return RAGService(
+        character_repository,
+        lore_chunk_repository,
+        prompt_builder,
+        ai_client,
+        policy=build_retrieval_policy(settings),
+        query_expander=query_expander,
+        tracer=tracer,
+    )
 
 
 async def get_ai_client(request: Request) -> AIClientProtocol:
@@ -61,17 +145,18 @@ async def get_tracer(request: Request) -> TracerProtocol:
 
 
 def get_character_repository(
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> CharacterRepository:
-    """Привязать репозиторий персонажей к сессии в пределах запроса."""
-    return CharacterRepository(session)
+    store: Annotated[VectorStore, Depends(get_vector_store)],
+) -> QdrantCharacterRepository:
+    """Привязать репозиторий образов к коллекции хранилища."""
+    return build_character_repository(store)
 
 
 def get_lore_chunk_repository(
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> LoreChunkRepository:
-    """Привязать репозиторий лора к сессии в пределах запроса."""
-    return LoreChunkRepository(session)
+    store: Annotated[VectorStore, Depends(get_vector_store)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> QdrantLoreChunkRepository:
+    """Привязать репозиторий лора к коллекции хранилища и к его гибридным настройкам."""
+    return build_lore_chunk_repository(store, build_sparse_encoder(settings), settings)
 
 
 def get_prompt_builder() -> ArchivePromptBuilder:
@@ -113,8 +198,10 @@ def get_query_expander(
 
 
 def get_rag_service(
-    character_repository: Annotated[CharacterRepository, Depends(get_character_repository)],
-    lore_chunk_repository: Annotated[LoreChunkRepository, Depends(get_lore_chunk_repository)],
+    character_repository: Annotated[QdrantCharacterRepository, Depends(get_character_repository)],
+    lore_chunk_repository: Annotated[
+        QdrantLoreChunkRepository, Depends(get_lore_chunk_repository)
+    ],
     prompt_builder: Annotated[ArchivePromptBuilder, Depends(get_prompt_builder)],
     ai_client: Annotated[AIClientProtocol, Depends(get_ai_client)],
     tracer: Annotated[TracerProtocol, Depends(get_tracer)],
@@ -122,31 +209,21 @@ def get_rag_service(
     query_expander: Annotated[QueryExpanderProtocol, Depends(get_query_expander)],
 ) -> RAGService:
     """Собрать RAG-конвейер из его зависимостей и конфигурации."""
-    return RAGService(
+    return build_rag_service(
         character_repository,
         lore_chunk_repository,
         prompt_builder,
         ai_client,
-        policy=RetrievalPolicy(
-            official=TierPolicy(
-                limit=settings.rag_official_top_k,
-                min_similarity=settings.rag_min_similarity,
-            ),
-            graffiti=TierPolicy(
-                limit=settings.rag_graffiti_top_k,
-                min_similarity=settings.rag_min_similarity,
-            ),
-            voice=TierPolicy(
-                limit=settings.rag_voice_top_k,
-                min_similarity=settings.rag_voice_min_similarity,
-            ),
-        ),
-        query_expander=query_expander,
-        tracer=tracer,
+        tracer,
+        settings,
+        query_expander,
     )
 
 
-SessionDep = Annotated[AsyncSession, Depends(get_session)]
-CharacterRepositoryDep = Annotated[CharacterRepository, Depends(get_character_repository)]
+VectorStoreDep = Annotated[VectorStore, Depends(get_vector_store)]
+CharacterRepositoryDep = Annotated[QdrantCharacterRepository, Depends(get_character_repository)]
+LoreChunkRepositoryDep = Annotated[
+    QdrantLoreChunkRepository, Depends(get_lore_chunk_repository)
+]
 RAGServiceDep = Annotated[RAGService, Depends(get_rag_service)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]

@@ -1,13 +1,13 @@
-"""Наполнение базы и индексация корпуса.
+"""Наполнение хранилища и индексация корпуса.
 
-Приводит базу к состоянию, которого ждёт терминал: схема, восемь образов
+Приводит Qdrant к состоянию, которого ждёт терминал: коллекции, восемь образов
 выживших и проиндексированный архив лора. Скрипт безопасно запускать повторно —
 образы обновляются на месте, а записи лора дедуплицируются по хэшу их текста,
-поэтому второй прогон не дублирует строки и не платит за эмбеддинги дважды.
+поэтому второй прогон не дублирует записи и не платит за эмбеддинги дважды.
 
 Использование:
-    python seed.py                    # схема + образы + корпус из снимка
-    python seed.py --reset            # сначала сбросить все таблицы, затем всё вышеперечисленное
+    python seed.py                    # коллекции + образы + корпус из снимка
+    python seed.py --reset            # сначала пересоздать коллекции, затем всё вышеперечисленное
     python seed.py --refresh          # сначала заново скачать корпус из вики
     python seed.py --refresh --translate      # ... и нормализовать его в русский
     python seed.py --refresh --corpus-only    # пересобрать снимок и остановиться
@@ -27,7 +27,8 @@ from collections.abc import Sequence
 from typing import TypedDict
 
 from app.config import Settings, get_settings
-from app.database import Database
+from app.dependencies import build_sparse_encoder
+from app.domain import Character
 from app.exceptions import ApplicationError
 from app.ingestion import (
     ArticleParser,
@@ -42,10 +43,10 @@ from app.ingestion import (
     WikiCorpusBuilder,
     WikitextCleaner,
 )
-from app.models import Character
-from app.repositories import CharacterRepository, LoreChunkRepository
+from app.interfaces import CharacterRepositoryProtocol, LoreArchiveAdminProtocol
 from app.schemas import LoreChunkCreate
 from app.services import LoreIngestionService, OpenAIClient
+from app.vector import QdrantCharacterRepository, QdrantLoreChunkRepository, VectorStore
 
 logger = logging.getLogger("l4d.seed")
 
@@ -327,8 +328,8 @@ CHARACTER_SEEDS: Sequence[CharacterSeed] = (
 )
 
 
-class DatabaseSeeder:
-    """Создаёт схему и загружает образы и проиндексированный корпус.
+class TerminalSeeder:
+    """Приводит обе коллекции к схеме и загружает образы и проиндексированный корпус.
 
     Seed-скрипт — это композиционный корень: он получает уже собранную
     инфраструктуру вместо того, чтобы строить её сам, поэтому один и тот же класс
@@ -337,12 +338,12 @@ class DatabaseSeeder:
 
     def __init__(
         self,
-        database: Database,
-        character_repository: CharacterRepository,
-        lore_chunk_repository: LoreChunkRepository,
+        vector_store: VectorStore,
+        character_repository: CharacterRepositoryProtocol,
+        lore_chunk_repository: LoreArchiveAdminProtocol,
         lore_ingestion_service: LoreIngestionService,
     ) -> None:
-        self._database = database
+        self._vector_store = vector_store
         self._characters = character_repository
         self._lore_chunks = lore_chunk_repository
         self._ingestion = lore_ingestion_service
@@ -354,47 +355,41 @@ class DatabaseSeeder:
         reingest: bool = False,
         documents: Sequence[LoreChunkCreate] = (),
     ) -> None:
-        """Подготовить схему, затем вставить или обновить образы и проиндексировать корпус."""
-        await self._prepare_schema(reset=reset)
+        """Подготовить коллекции, затем записать образы и проиндексировать корпус."""
+        await self._prepare_collections(reset=reset)
         await self._seed_characters()
         await self._seed_lore(documents, reingest=reingest)
 
-    async def _prepare_schema(self, *, reset: bool) -> None:
+    async def _prepare_collections(self, *, reset: bool) -> None:
+        """Создать коллекции, а при ``reset`` — пересоздать их с нуля."""
         if reset:
-            logger.info("Dropping existing tables")
-            await self._database.drop_all()
-        await self._database.create_all()
-        logger.info("Schema is ready (pgvector extension enabled)")
+            logger.info("Recreating collections from scratch")
+        await self._vector_store.ensure_collections(recreate=reset)
+        logger.info(
+            "Collections are ready: %s, %s",
+            self._vector_store.lore_collection,
+            self._vector_store.character_collection,
+        )
 
     async def _seed_characters(self) -> None:
-        """Вставить отсутствующие образы и обновить те, у которых изменился промпт.
+        """Записать каждый образ, обновив его на месте, если он уже есть.
 
         Обновление на месте означает, что правка образа вступает в силу на следующем
-        прогоне: сбрасывать всю базу ради одной изменённой реплики — значит сделать
+        прогоне: сбрасывать архив ради одной изменённой реплики — значит сделать
         образы невозможными для итерации.
         """
         inserted = 0
         updated = 0
         for seed in CHARACTER_SEEDS:
-            existing = await self._characters.get_by_name(seed["name"])
-            if existing is None:
-                await self._characters.add(
-                    Character(
-                        name=seed["name"],
-                        system_prompt=seed["system_prompt"],
-                        few_shot_examples=seed["few_shot_examples"],
-                    )
+            created = await self._characters.save(
+                Character(
+                    name=seed["name"],
+                    system_prompt=seed["system_prompt"],
+                    few_shot_examples=seed["few_shot_examples"],
                 )
-                inserted += 1
-                continue
-            if (
-                existing.system_prompt != seed["system_prompt"]
-                or existing.few_shot_examples != seed["few_shot_examples"]
-            ):
-                existing.system_prompt = seed["system_prompt"]
-                existing.few_shot_examples = seed["few_shot_examples"]
-                await self._characters.session.flush()
-                updated += 1
+            )
+            inserted += int(created)
+            updated += int(not created)
         logger.info("Personas: %d inserted, %d updated", inserted, updated)
 
     async def _seed_lore(
@@ -486,21 +481,26 @@ async def main(
         logger.info("Loaded %d corpus record(s) from the snapshot", len(documents))
 
         assert ai_client is not None  # guaranteed by requires_provider above
-        database = Database(settings)
+        vector_store = VectorStore(settings)
         try:
-            async with database.session() as session:
-                lore_chunk_repository = LoreChunkRepository(session)
-                seeder = DatabaseSeeder(
-                    database=database,
-                    character_repository=CharacterRepository(session),
-                    lore_chunk_repository=lore_chunk_repository,
-                    lore_ingestion_service=LoreIngestionService(
-                        lore_chunk_repository, ai_client
-                    ),
-                )
-                await seeder.run(reset=reset, reingest=reingest, documents=documents)
+            lore_chunk_repository = QdrantLoreChunkRepository(
+                vector_store.client,
+                vector_store.lore_collection,
+                build_sparse_encoder(settings),
+                hybrid_enabled=settings.rag_hybrid_enabled,
+                prefetch_multiplier=settings.rag_prefetch_multiplier,
+            )
+            seeder = TerminalSeeder(
+                vector_store=vector_store,
+                character_repository=QdrantCharacterRepository(
+                    vector_store.client, vector_store.character_collection
+                ),
+                lore_chunk_repository=lore_chunk_repository,
+                lore_ingestion_service=LoreIngestionService(lore_chunk_repository, ai_client),
+            )
+            await seeder.run(reset=reset, reingest=reingest, documents=documents)
         finally:
-            await database.dispose()
+            await vector_store.close()
     finally:
         if ai_client is not None:
             await ai_client.aclose()
@@ -511,7 +511,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--reset",
         action="store_true",
-        help="удалить все таблицы перед наполнением",
+        help="пересоздать коллекции перед наполнением",
     )
     parser.add_argument(
         "--refresh",

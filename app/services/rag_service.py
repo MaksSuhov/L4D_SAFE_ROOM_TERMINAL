@@ -138,14 +138,17 @@ class RAGService:
         замерять время до первого токена.
         """
         character = await self._characters.get_by_id(character_id)
-        if character is None:
+        if character is None or character.id is None:
+            # A persona that was never stored carries no identifier, so a caller
+            # holding only an identifier cannot be talking about it.
             raise CharacterNotFoundError(character_id)
+        identifier = character.id
 
         probes = await self._build_probes(user_message)
         evidence = await self._retrieve_evidence(probes, character.name)
 
         return PreparedChat(
-            character_id=character.id,
+            character_id=identifier,
             character_name=character.name,
             model=self._ai_client.model_name,
             system_prompt=character.system_prompt,
@@ -231,6 +234,7 @@ class RAGService:
         for probe in probes:
             matches = await self._lore_chunks.search_similar_chunks(
                 probe.embedding,
+                probe.query,
                 limit=policy.limit,
                 source_types=[source_type],
                 character_name=character_name,

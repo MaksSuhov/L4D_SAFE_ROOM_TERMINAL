@@ -1,8 +1,8 @@
 """Точка входа приложения.
 
-Модуль связывает слои: создаёт общую инфраструктуру (движок, AI-клиент, трейсер)
-на протяжении жизненного цикла, регистрирует роутеры и переводит доменные
-исключения в HTTP-ответы.
+Модуль связывает слои: создаёт общую инфраструктуру (хранилище, AI-клиент,
+трейсер) на протяжении жизненного цикла, регистрирует роутеры и переводит
+доменные исключения в HTTP-ответы.
 """
 
 from __future__ import annotations
@@ -16,14 +16,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import Settings, get_settings
-from app.database import Database
-from app.exceptions import AIServiceError, ResourceNotFoundError
+from app.exceptions import AIServiceError, ResourceNotFoundError, VectorStoreError
 from app.routers import router as api_router
 from app.services import OpenAIClient, build_tracer
+from app.vector import VectorStore
 
 DESCRIPTION: str = (
     "Интерактивный терминал убежища из Left 4 Dead. Образы выживших отвечают на "
-    "вопросы игрока, опираясь на архив лора в pgvector и OpenAI API."
+    "вопросы игрока, опираясь на архив лора в Qdrant и OpenAI API."
 )
 
 
@@ -32,14 +32,14 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     """Создать общие ресурсы при запуске и освободить их при остановке."""
     settings: Settings = get_settings()
 
-    database = Database(settings)
+    vector_store = VectorStore(settings)
     ai_client = OpenAIClient(settings)
     tracer = build_tracer(settings)
 
-    if settings.auto_create_tables:
-        await database.create_all()
+    if settings.auto_create_collections:
+        await vector_store.ensure_collections()
 
-    application.state.database = database
+    application.state.vector_store = vector_store
     application.state.ai_client = ai_client
     application.state.tracer = tracer
 
@@ -47,7 +47,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await ai_client.aclose()
-        await database.dispose()
+        await vector_store.close()
         # The tracer batches observations, so the last few seconds of traces exist
         # only until the queue is drained; a shutdown that skips this loses them.
         tracer.flush()
@@ -68,6 +68,15 @@ async def handle_ai_service_error(request: Request, exc: Exception) -> JSONRespo
     assert isinstance(exc, AIServiceError)
     return JSONResponse(
         status_code=status.HTTP_502_BAD_GATEWAY,
+        content={"detail": str(exc)},
+    )
+
+
+async def handle_vector_store_error(request: Request, exc: Exception) -> JSONResponse:
+    """Перевести сбой векторного хранилища в ``503 Service Unavailable``."""
+    assert isinstance(exc, VectorStoreError)
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={"detail": str(exc)},
     )
 
@@ -95,6 +104,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
     application.add_exception_handler(ResourceNotFoundError, handle_resource_not_found)
     application.add_exception_handler(AIServiceError, handle_ai_service_error)
+    application.add_exception_handler(VectorStoreError, handle_vector_store_error)
     application.include_router(api_router, prefix=active_settings.api_prefix)
 
     @application.get("/", include_in_schema=False)

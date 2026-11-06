@@ -17,6 +17,7 @@ from app.dependencies import (
     get_character_repository,
     get_lore_chunk_repository,
     get_query_expander,
+    get_vector_store,
 )
 from app.interfaces import RetrievedChunk
 from app.main import create_app
@@ -24,6 +25,7 @@ from app.taxonomy import SourceType
 from tests.fakes import (
     FakeAIClient,
     FakeQueryExpander,
+    FakeVectorStore,
     InMemoryCharacterRepository,
     InMemoryLoreChunkRepository,
     build_character,
@@ -68,17 +70,24 @@ def query_expander() -> FakeQueryExpander:
 
 
 @pytest.fixture
+def vector_store() -> FakeVectorStore:
+    return FakeVectorStore()
+
+
+@pytest.fixture
 def client(
     character_repository: InMemoryCharacterRepository,
     lore_chunk_repository: InMemoryLoreChunkRepository,
     ai_client: FakeAIClient,
     query_expander: FakeQueryExpander,
+    vector_store: FakeVectorStore,
 ) -> Iterator[TestClient]:
     application = create_app()
     application.dependency_overrides[get_character_repository] = lambda: character_repository
     application.dependency_overrides[get_lore_chunk_repository] = lambda: lore_chunk_repository
     application.dependency_overrides[get_ai_client] = lambda: ai_client
     application.dependency_overrides[get_query_expander] = lambda: query_expander
+    application.dependency_overrides[get_vector_store] = lambda: vector_store
 
     with TestClient(application) as test_client:
         yield test_client
@@ -191,6 +200,20 @@ def test_health_endpoint_reports_liveness(client: TestClient) -> None:
     payload = response.json()
     assert payload["status"] == "ok"
     assert payload["version"] == get_settings().app_version
+    assert payload["vector_store"] == "ok"
+
+
+def test_health_reports_an_unreachable_store() -> None:
+    """Проверить, что проба готовности честно сообщает о недоступном хранилище."""
+    application = create_app()
+    application.dependency_overrides[get_vector_store] = lambda: FakeVectorStore(reachable=False)
+
+    with TestClient(application) as test_client:
+        payload = test_client.get(f"{API_PREFIX}/health").json()
+
+    application.dependency_overrides.clear()
+    assert payload["status"] == "ok"
+    assert payload["vector_store"] == "unavailable"
 
 
 def test_cors_preflight_allows_the_frontend_origin(client: TestClient) -> None:

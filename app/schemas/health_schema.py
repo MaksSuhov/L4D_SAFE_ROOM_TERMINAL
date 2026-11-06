@@ -10,4 +10,5 @@ class HealthResponse(BaseModel):
 
     status: str
     version: str
-    database: str
+    vector_store: str
+    """Доступность Qdrant: ``ok`` или ``unavailable``."""

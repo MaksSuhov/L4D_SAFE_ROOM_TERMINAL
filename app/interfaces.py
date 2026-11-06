@@ -1,9 +1,9 @@
 """Порты приложения (принцип инверсии зависимостей).
 
 Слой сервисов зависит от этих определений ``Protocol``, а не от конкретных
-репозиториев SQLAlchemy или обёртки над OpenAI SDK. Вместо них можно внедрить
+адаптеров Qdrant или обёртки над OpenAI SDK. Вместо них можно внедрить
 любой объект подходящей формы — настоящий адаптер, заглушку из тестов или
-будущий клиент векторной базы.
+будущий клиент иного векторного хранилища.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any, NamedTuple, Protocol
 
-from app.models import Character, LoreChunk
+from app.domain import Character, LoreChunk
 from app.schemas import EmbeddedLoreChunk, LoreSource
 from app.taxonomy import SourceType
 
@@ -68,14 +68,28 @@ class ExpandedQuery:
 
 
 class CharacterRepositoryProtocol(Protocol):
-    """Доступ на чтение к образам персонажей."""
+    """Доступ к образам персонажей и их сохранение."""
 
     async def get_by_id(self, entity_id: int) -> Character | None:
         """Вернуть персонажа с данным идентификатором или ``None``."""
         ...
 
+    async def get_by_name(self, name: str) -> Character | None:
+        """Найти персонажа по его уникальному отображаемому имени."""
+        ...
+
     async def get_all(self) -> Sequence[Character]:
         """Вернуть всех сохранённых персонажей, упорядоченных по идентификатору."""
+        ...
+
+    async def save(self, character: Character) -> bool:
+        """Сохранить образ, обновив его на месте, если он уже есть.
+
+        Возвращает признак того, что образ добавлен впервые: инструменту
+        наполнения это нужно для отчёта о прогоне. Обновление на месте — часть
+        контракта, а не деталь реализации: правка промпта не должна требовать
+        очистки всего хранилища.
+        """
         ...
 
 
@@ -93,6 +107,7 @@ class LoreChunkRepositoryProtocol(Protocol):
     async def search_similar_chunks(
         self,
         query_embedding: Sequence[float],
+        query_text: str,
         *,
         limit: int,
         source_types: Sequence[SourceType] | None = None,
@@ -104,6 +119,15 @@ class LoreChunkRepositoryProtocol(Protocol):
         ``source_types`` ограничивает поиск одним или несколькими уровнями
         доказательств — именно это делает двухуровневую выборку возможной: факты
         ищутся среди официальных записей, а слухи — среди надписей на стенах.
+
+        ``query_text`` идёт рядом с вектором, потому что гибридный поиск ведут два
+        плеча: косинусное и лексическое. Вернуть текст из эмбеддинга нельзя,
+        поэтому вопрос передаётся дословно, как его набрал игрок. Реализация без
+        лексического плеча вправе его проигнорировать.
+
+        Реализация сама решает, кто попадёт в бюджет уровня: гибридная наполняет
+        его в порядке слияния двух плеч, а ``similarity`` остаётся косинусной
+        близостью, чтобы вызывающий мог фильтровать по ней.
         """
         ...
 
@@ -113,6 +137,20 @@ class LoreChunkRepositoryProtocol(Protocol):
 
     async def count(self) -> int:
         """Вернуть число сохранённых фрагментов лора."""
+        ...
+
+
+class LoreArchiveAdminProtocol(LoreChunkRepositoryProtocol, Protocol):
+    """Операции жизненного цикла архива, доступные только инструменту наполнения.
+
+    Отдельный порт существует ради одной строки в типах: сервис, зависящий от
+    :class:`LoreChunkRepositoryProtocol`, физически не может опустошить архив,
+    потому что такого метода в его контракте нет. Право на очистку есть только у
+    инструмента, владеющего жизненным циклом архива, — у seed-скрипта.
+    """
+
+    async def delete_all(self) -> int:
+        """Удалить все записи архива и сообщить, сколько их было."""
         ...
 
 

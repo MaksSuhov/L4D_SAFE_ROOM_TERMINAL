@@ -1,11 +1,11 @@
 """Точка входа: прогнать датасет через терминал и оценить ответы.
 
-Запуск из корня проекта (нужны поднятая база, наполненный архив и AI_API_KEY)::
+Запуск из корня проекта (нужны поднятый Qdrant, наполненный архив и AI_API_KEY)::
 
     make eval
     .venv/bin/python -m scripts.evaluate --dataset data/eval/questions.jsonl --limit 5
 
-Скрипт собирает те же зависимости, что и HTTP-слой (``get_rag_service``), поэтому
+Скрипт собирает те же зависимости, что и HTTP-слой (``build_rag_service``), поэтому
 оценивается ровно тот пайплайн, который отвечает игрокам, а не его копия.
 """
 
@@ -19,8 +19,13 @@ import sys
 from pathlib import Path
 
 from app.config import Settings, get_settings
-from app.database import Database
-from app.dependencies import build_query_expander, get_rag_service
+from app.dependencies import (
+    build_character_repository,
+    build_lore_chunk_repository,
+    build_query_expander,
+    build_rag_service,
+    build_sparse_encoder,
+)
 from app.evaluation import (
     CaseEvaluator,
     EmbeddingSimilarity,
@@ -30,8 +35,8 @@ from app.evaluation import (
     load_cases,
 )
 from app.exceptions import AIServiceError, EvaluationError
-from app.repositories import CharacterRepository, LoreChunkRepository
 from app.services import ArchivePromptBuilder, OpenAIClient, build_tracer
+from app.vector import VectorStore
 
 logger = logging.getLogger("l4d.eval")
 
@@ -71,34 +76,33 @@ async def evaluate(*, dataset: Path, limit: int) -> tuple[EvaluationReport, dict
         raise EvaluationError(f"Dataset is empty: {dataset}")
 
     client = OpenAIClient(settings)
-    database = Database(settings)
+    vector_store = VectorStore(settings)
     tracer = build_tracer(settings)
     try:
-        async with database.session() as session:
-            rag_service = get_rag_service(
-                CharacterRepository(session),
-                LoreChunkRepository(session),
-                ArchivePromptBuilder(),
-                client,
-                tracer,
-                settings,
-                build_query_expander(client, settings, tracer),
-            )
-            evaluator = CaseEvaluator(
-                context_builder=rag_service,
-                model=client,
-                judge=LLMJudge(client),
-                similarity=EmbeddingSimilarity(client),
-                attempts=settings.eval_attempts,
-                temperature=settings.eval_temperature,
-            )
-            report = await EvaluationService(evaluator).run(cases)
+        rag_service = build_rag_service(
+            build_character_repository(vector_store),
+            build_lore_chunk_repository(vector_store, build_sparse_encoder(settings), settings),
+            ArchivePromptBuilder(),
+            client,
+            tracer,
+            settings,
+            build_query_expander(client, settings, tracer),
+        )
+        evaluator = CaseEvaluator(
+            context_builder=rag_service,
+            model=client,
+            judge=LLMJudge(client),
+            similarity=EmbeddingSimilarity(client),
+            attempts=settings.eval_attempts,
+            temperature=settings.eval_temperature,
+        )
+        report = await EvaluationService(evaluator).run(cases)
     finally:
         # The process exits as soon as this returns, so the tracer has to be drained
         # here: batching would otherwise drop the whole run on the floor.
         tracer.flush()
         tracer.shutdown()
-        await database.dispose()
+        await vector_store.close()
         await client.aclose()
 
     config: dict[str, object] = {

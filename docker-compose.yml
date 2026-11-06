@@ -1,20 +1,23 @@
 services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: l4d_terminal_db
-    environment:
-      POSTGRES_USER: l4d
-      POSTGRES_PASSWORD: l4d
-      POSTGRES_DB: l4d_terminal
+  qdrant:
+    # Гибридный поиск требует сервер не старше 1.10 (prefetch + слияние рангов).
+    # Тег держится на одной минорной версии с qdrant-client из requirements.txt:
+    # клиент предупреждает, когда расхождение больше, и предупреждение не врёт —
+    # на разошедшихся версиях расходятся и схемы запросов.
+    image: qdrant/qdrant:v1.20.0
+    container_name: l4d_terminal_vectors
     ports:
-      - "5432:5432"
+      - "6333:6333" # REST API и веб-панель: http://localhost:6333/dashboard
+      - "6334:6334" # gRPC
     volumes:
-      - l4d_pgdata:/var/lib/postgresql/data
+      - l4d_qdrant:/qdrant/storage
+      - l4d_qdrant_snapshots:/qdrant/snapshots
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U l4d -d l4d_terminal"]
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
       interval: 5s
-      timeout: 5s
-      retries: 10
+      timeout: 3s
+      retries: 20
 
 volumes:
-  l4d_pgdata:
+  l4d_qdrant:
+  l4d_qdrant_snapshots:

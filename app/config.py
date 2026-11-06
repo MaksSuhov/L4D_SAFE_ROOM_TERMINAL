@@ -16,7 +16,8 @@ from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 DEFAULT_EMBEDDING_DIMENSIONS: Final[int] = 1536
-"""Размерность векторов ``text-embedding-3-small``; используется и столбцом pgvector."""
+"""Размерность векторов ``text-embedding-3-small``; с ней создаётся плотный вектор
+коллекции, поэтому настройка обязана совпадать с моделью эмбеддингов."""
 
 
 class Settings(BaseSettings):
@@ -69,17 +70,46 @@ class Settings(BaseSettings):
         ),
     )
 
-    # --- Database --------------------------------------------------------
-    database_url: str = Field(
-        default="postgresql+asyncpg://l4d:l4d@localhost:5432/l4d_terminal",
-        description="Асинхронный DSN SQLAlchemy. В целевой базе нужно расширение pgvector.",
+    # --- Vector store (Qdrant) -------------------------------------------
+    # The archive and the personas live in one Qdrant instance, so a single store
+    # serves the whole project and no relational database is needed alongside it.
+    qdrant_url: str = Field(
+        default="http://localhost:6333",
+        description="Адрес Qdrant REST API; gRPC живёт на том же хосте, порт 6334.",
     )
-    database_echo: bool = False
-    database_pool_size: int = 5
-    database_max_overflow: int = 10
-    auto_create_tables: bool = Field(
+    qdrant_api_key: str = Field(
+        default="",
+        repr=False,
+        description="Ключ доступа; пустая строка — локальный узел без аутентификации.",
+    )
+    qdrant_prefer_grpc: bool = Field(
         default=False,
-        description="Создавать схему при старте приложения вместо запуска seed.py.",
+        description="Гонять запросы по gRPC; выключатель нужен там, где порт 6334 закрыт.",
+    )
+    qdrant_timeout_seconds: int = Field(
+        default=10,
+        gt=0,
+        description="Сколько секунд ждать ответа хранилища, прежде чем счесть его недоступным.",
+    )
+    qdrant_check_compatibility: bool = Field(
+        default=True,
+        description=(
+            "Сверять версию клиента с версией сервера при создании клиента. Проверка "
+            "best-effort: она замечает расхождение версий, но делает создание клиента "
+            "сетевой операцией. Среды без сервера (тесты, офлайн-сборка) выключают её."
+        ),
+    )
+    lore_collection: str = Field(
+        default="lore_chunks",
+        description="Коллекция архива лора: гибридный поиск по уровням доказательств.",
+    )
+    character_collection: str = Field(
+        default="characters",
+        description="Коллекция образов выживших; векторов у неё нет, только payload.",
+    )
+    auto_create_collections: bool = Field(
+        default=False,
+        description="Создавать коллекции при старте приложения вместо запуска seed.py.",
     )
 
     # --- AI provider ------------------------------------------------------
@@ -186,7 +216,9 @@ class Settings(BaseSettings):
             "Порог косинусной близости для уровней-доказательств (лор и надписи): "
             "более слабые совпадения отбрасываются и не попадают в модель. Чуть выше "
             "уровня шума text-embedding-3-small, где несвязанные тексты редко "
-            "проходят 0.2."
+            "проходят 0.2. Порог остаётся косинусным и при гибридном поиске: "
+            "лексическое плечо расширяет воронку кандидатов, а близость находки "
+            "всё равно меряется эмбеддингом."
         ),
     )
     rag_voice_min_similarity: float = Field(
@@ -197,6 +229,39 @@ class Settings(BaseSettings):
             "Порог для собственных реплик персонажа. Они служат образцом стиля, а не "
             "доказательством, поэтому самые близкие передаются даже когда вопрос не "
             "связан с тем, для чего эти реплики записаны."
+        ),
+    )
+
+    # --- Hybrid retrieval (dense + BM25) ----------------------------------
+    # A question and the record that answers it may share a rare word without
+    # sharing a meaning, and may share a meaning without sharing a word. The
+    # lexical leg catches the first case and the dense leg the second; their
+    # output is fused, so either can bring a record into a tier's budget.
+    rag_hybrid_enabled: bool = Field(
+        default=True,
+        description="Выключатель гибрида: false — поиск идёт только по косинусу.",
+    )
+    sparse_embedding_model: str = Field(
+        default="Qdrant/bm25",
+        description="Модель разреженного вектора. Считается локально, без провайдера.",
+    )
+    sparse_embedding_language: str = Field(
+        default="russian",
+        min_length=2,
+        max_length=16,
+        description=(
+            "Язык BM25: токенизация, стеммер и стоп-слова зависят от языка, а корпус "
+            "русский. Расхождение с языком корпуса обесценивает лексическое плечо."
+        ),
+    )
+    rag_prefetch_multiplier: int = Field(
+        default=4,
+        ge=1,
+        le=20,
+        description=(
+            "Во сколько раз больше кандидатов берёт каждое плечо гибрида, прежде чем "
+            "итог сжимается до бюджета уровня. Единица лишает гибрид смысла: у плеч "
+            "не остаётся места разойтись."
         ),
     )
 

@@ -1,17 +1,21 @@
 """Двойники в памяти, реализующие порты приложения.
 
 Они доказывают принцип инверсии зависимостей на практике: конвейер RAG
-работает на этих заглушках без PostgreSQL, pgvector и доступа к сети.
+работает на этих заглушках без Qdrant, без модели BM25 и без доступа к сети.
 """
 
 from __future__ import annotations
 
+import hashlib
+import re
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any
 
+from qdrant_client import models
+
+from app.domain import Character, LoreChunk
 from app.interfaces import ExpandedQuery, RetrievedChunk
-from app.models import Character, LoreChunk
 from app.schemas import EmbeddedLoreChunk, LoreChunkCreate
 from app.taxonomy import LoreTopic, SourceType
 
@@ -26,7 +30,7 @@ def build_character(
     system_prompt: str = "Ты — Эллис.",
     few_shot_examples: list[dict[str, str]] | None = None,
 ) -> Character:
-    """Создать отсоединённую ORM-сущность персонажа, сессия не нужна."""
+    """Создать доменную сущность персонажа без участия хранилища."""
     return Character(
         id=character_id,
         name=name,
@@ -44,10 +48,10 @@ def build_chunk(
     title: str = "Archive",
     character_name: str | None = None,
 ) -> LoreChunk:
-    """Создать отсоединённый фрагмент лора с фиктивным эмбеддингом.
+    """Создать фрагмент лора с хешем, выведенным из идентификатора.
 
-    Хэш выводится из идентификатора и потому уникален: по нему конвейер отличает
-    одну запись архива от другой, и заглушка обязана повторять это свойство.
+    Хэш уникален: по нему конвейер отличает одну запись архива от другой, и
+    заглушка обязана повторять это свойство.
     """
     return LoreChunk(
         id=chunk_id,
@@ -58,7 +62,6 @@ def build_chunk(
         title=title,
         character_name=character_name,
         source_url="",
-        embedding=[0.1] * EMBEDDING_SIZE,
     )
 
 
@@ -85,14 +88,31 @@ class InMemoryCharacterRepository:
 
     def __init__(self, characters: Sequence[Character] | None = None) -> None:
         self._characters: dict[int, Character] = {
-            character.id: character for character in characters or ()
+            character.id: character for character in characters or () if character.id is not None
         }
 
     async def get_by_id(self, entity_id: int) -> Character | None:
         return self._characters.get(entity_id)
 
+    async def get_by_name(self, name: str) -> Character | None:
+        for character in self._characters.values():
+            if character.name == name:
+                return character
+        return None
+
     async def get_all(self) -> Sequence[Character]:
-        return sorted(self._characters.values(), key=lambda character: character.id)
+        return sorted(self._characters.values(), key=lambda character: character.id or 0)
+
+    async def save(self, character: Character) -> bool:
+        """Записать образ, обновив существующий на месте."""
+        existing = await self.get_by_name(character.name)
+        if existing is not None:
+            existing.system_prompt = character.system_prompt
+            existing.few_shot_examples = list(character.few_shot_examples)
+            return False
+        character.id = max(self._characters, default=0) + 1
+        self._characters[character.id] = character
+        return True
 
 
 class InMemoryLoreChunkRepository:
@@ -121,6 +141,7 @@ class InMemoryLoreChunkRepository:
     async def search_similar_chunks(
         self,
         query_embedding: Sequence[float],
+        query_text: str,
         *,
         limit: int,
         source_types: Sequence[SourceType] | None = None,
@@ -130,6 +151,7 @@ class InMemoryLoreChunkRepository:
         self.searches.append(
             {
                 "query_embedding": list(query_embedding),
+                "query_text": query_text,
                 "limit": limit,
                 "source_types": list(source_types) if source_types is not None else None,
                 "topic": topic,
@@ -188,8 +210,52 @@ class InMemoryLoreChunkRepository:
             title=record.title,
             character_name=record.character_name,
             source_url=record.source_url,
-            embedding=list(record.embedding),
         )
+
+
+class FakeVectorStore:
+    """Хранилище-двойник: проба готовности отвечает, не обращаясь к Qdrant.
+
+    Заменяет только то, о чём спрашивает проба; репозитории рядом получают
+    собственные двойники, поэтому клиента и имён коллекций здесь нет.
+    """
+
+    def __init__(self, *, reachable: bool = True) -> None:
+        self._reachable = reachable
+
+    async def ping(self) -> bool:
+        return self._reachable
+
+
+class FakeSparseEncoder:
+    """Разреженный вектор без модели: слово даёт устойчивый индекс, значение — счётчик.
+
+    Двойник нужен там, где проверяется механика гибридного поиска, а не качество
+    BM25: он детерминирован, работает офлайн и повторяет главное свойство модели —
+    один и тот же термин получает один и тот же индекс и у записи корпуса, и у
+    вопроса.
+    """
+
+    def __init__(self) -> None:
+        self.encoded_documents: list[str] = []
+        self.encoded_queries: list[str] = []
+
+    async def encode_documents(self, texts: Sequence[str]) -> list[models.SparseVector]:
+        batch = list(texts)
+        self.encoded_documents.extend(batch)
+        return [self._encode(text) for text in batch]
+
+    async def encode_query(self, text: str) -> models.SparseVector:
+        self.encoded_queries.append(text)
+        return self._encode(text)
+
+    @staticmethod
+    def _encode(text: str) -> models.SparseVector:
+        weights: dict[int, float] = {}
+        for token in re.findall(r"\w+", text.lower()):
+            index = int(hashlib.blake2b(token.encode("utf-8"), digest_size=4).hexdigest(), 16)
+            weights[index] = weights.get(index, 0.0) + 1.0
+        return models.SparseVector(indices=list(weights), values=list(weights.values()))
 
 
 class FakeAIClient:
