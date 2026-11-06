@@ -29,6 +29,11 @@ data/wiki_cache/
 # harness reads. Reports are produced by `make eval` and are not tracked.
 data/eval/report*.json
 
+# Migration tooling
+# The pgvector export is an artefact of the move to Qdrant, not part of the
+# project: it is produced and consumed by `scripts/import_lore_csv.py`.
+data/migration/
+
 # Tooling
 .DS_Store
 .idea/
