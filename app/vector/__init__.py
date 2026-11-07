@@ -8,11 +8,15 @@ from app.vector.bm25 import Bm25Encoder, SparseEncoderProtocol
 from app.vector.character_repository import QdrantCharacterRepository
 from app.vector.client import VectorStore
 from app.vector.lore_repository import QdrantLoreChunkRepository
+from app.vector.refresh_session_repository import QdrantRefreshSessionRepository
+from app.vector.user_repository import QdrantUserRepository
 
 __all__ = [
     "Bm25Encoder",
     "QdrantCharacterRepository",
     "QdrantLoreChunkRepository",
+    "QdrantRefreshSessionRepository",
+    "QdrantUserRepository",
     "SparseEncoderProtocol",
     "VectorStore",
 ]

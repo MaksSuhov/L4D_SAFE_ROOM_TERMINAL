@@ -12,7 +12,12 @@ from __future__ import annotations
 from qdrant_client import AsyncQdrantClient
 
 from app.config import Settings
-from app.vector.schema import ensure_character_collection, ensure_lore_collection
+from app.vector.schema import (
+    ensure_character_collection,
+    ensure_lore_collection,
+    ensure_refresh_session_collection,
+    ensure_user_collection,
+)
 
 
 class VectorStore:
@@ -46,11 +51,23 @@ class VectorStore:
         """Имя коллекции образов выживших."""
         return self._settings.character_collection
 
-    async def ensure_collections(self, *, recreate: bool = False) -> None:
-        """Привести обе коллекции к объявленной схеме.
+    @property
+    def user_collection(self) -> str:
+        """Имя коллекции учётных записей."""
+        return self._settings.user_collection
 
-        ``recreate`` — выключатель деструктивного инструмента: он опустошает
-        архивы, чтобы изменившийся корпус заменял записи, а не наслаивался на них.
+    @property
+    def refresh_session_collection(self) -> str:
+        """Имя коллекции выданных refresh-сессий."""
+        return self._settings.refresh_session_collection
+
+    async def ensure_collections(self, *, recreate: bool = False) -> None:
+        """Привести коллекции к объявленной схеме.
+
+        ``recreate`` — выключатель деструктивного инструмента, и он касается
+        только архива: пересборка корпуса опустошает лор и образы, но учётные
+        записи и сессии не задевает. Сброс архива не должен выкидывать людей с
+        терминала — это разные жизненные циклы данных, и смешивать их нельзя.
         """
         await ensure_lore_collection(
             self._client,
@@ -63,6 +80,8 @@ class VectorStore:
             self.character_collection,
             recreate=recreate,
         )
+        await ensure_user_collection(self._client, self.user_collection)
+        await ensure_refresh_session_collection(self._client, self.refresh_session_collection)
 
     async def ping(self) -> bool:
         """Проверить живость узла; используется пробой готовности."""
