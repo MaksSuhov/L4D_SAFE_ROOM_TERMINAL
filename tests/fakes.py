@@ -10,14 +10,16 @@ import hashlib
 import re
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from qdrant_client import models
 
-from app.domain import Character, LoreChunk
+from app.domain import Character, LoreChunk, RefreshSession, User, normalise_email
+from app.exceptions import EmailAlreadyRegisteredError
 from app.interfaces import ExpandedQuery, RetrievedChunk
 from app.schemas import EmbeddedLoreChunk, LoreChunkCreate
-from app.taxonomy import LoreTopic, SourceType
+from app.taxonomy import LoreTopic, SourceType, UserRole
 
 EMBEDDING_SIZE = 4
 """Заглушкам не важна настоящая ширина вектора эмбеддинга."""
@@ -472,3 +474,165 @@ class RecordingTracer:
             if span_name == name:
                 return span
         raise AssertionError(f"no span named {name!r}")
+
+
+def build_user(
+    *,
+    user_id: str = "user-1",
+    email: str = "ellis@l4d.dev",
+    password_hash: str = "fake$correct-horse-battery",
+    display_name: str = "Эллис",
+    role: UserRole = UserRole.MEMBER,
+    is_active: bool = True,
+) -> User:
+    """Создать учётную запись без участия хранилища."""
+    return User(
+        email=email,
+        password_hash=password_hash,
+        display_name=display_name,
+        role=role,
+        is_active=is_active,
+        id=user_id,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+
+class FixedClock:
+    """Часы, которые стоят, пока их не сдвинут.
+
+    Сроки жизни токенов и сессий проверяются ожиданием в реальном времени — это
+    медленно и ненадёжно, поэтому тесты двигают часы сами.
+    """
+
+    def __init__(self, start: datetime | None = None) -> None:
+        self._now = start or datetime(2026, 1, 1, tzinfo=UTC)
+
+    def now(self) -> datetime:
+        return self._now
+
+    def advance(self, seconds: float) -> None:
+        """Перевести часы вперёд на указанное число секунд."""
+        self._now += timedelta(seconds=seconds)
+
+
+class FakePasswordHasher:
+    """Хеширование без Argon2: тестам важна логика доступа, а не стоимость перебора.
+
+    Настоящий хешер проверяется отдельным тестом на настоящем Argon2; здесь он
+    стоял бы десятки миллисекунд на каждый вызов и ничего бы не проверял.
+    """
+
+    def __init__(self) -> None:
+        self.hashed: list[str] = []
+        self.verified: list[str] = []
+        self.equalised: list[str] = []
+        self.stale: set[str] = set()
+        """Хеши, которые двойник объявит устаревшими, чтобы проверить их пересчёт."""
+
+    def hash(self, password: str) -> str:
+        self.hashed.append(password)
+        return f"fake${password}"
+
+    def verify(self, password: str, encoded: str) -> bool:
+        self.verified.append(password)
+        return encoded == f"fake${password}"
+
+    def needs_rehash(self, encoded: str) -> bool:
+        return encoded in self.stale
+
+    def equalise_timing(self, password: str) -> None:
+        self.equalised.append(password)
+
+
+class InMemoryUserRepository:
+    """Реализация :class:`UserRepositoryProtocol` на словаре."""
+
+    def __init__(self, users: Sequence[User] | None = None) -> None:
+        self.users: dict[str, User] = {normalise_email(user.email): user for user in users or ()}
+        self._issued = 0
+
+    async def get_by_id(self, entity_id: str) -> User | None:
+        return next((user for user in self.users.values() if user.id == entity_id), None)
+
+    async def get_by_email(self, email: str) -> User | None:
+        return self.users.get(normalise_email(email))
+
+    async def get_all(self) -> Sequence[User]:
+        return sorted(self.users.values(), key=lambda user: user.email)
+
+    async def create(self, user: User) -> None:
+        key = normalise_email(user.email)
+        if key in self.users:
+            raise EmailAlreadyRegisteredError(key)
+        if user.id is None:
+            self._issued += 1
+            user.id = f"user-{self._issued}"
+        self.users[key] = user
+
+    async def update(self, user: User) -> None:
+        self.users[normalise_email(user.email)] = user
+
+    async def delete(self, entity_id: str) -> bool:
+        found = await self.get_by_id(entity_id)
+        if found is None:
+            return False
+        del self.users[normalise_email(found.email)]
+        return True
+
+    async def count(self) -> int:
+        return len(self.users)
+
+
+class InMemoryRefreshSessionRepository:
+    """Реализация :class:`RefreshSessionRepositoryProtocol` на списке."""
+
+    def __init__(self) -> None:
+        self.sessions: list[RefreshSession] = []
+        self._issued = 0
+
+    async def create(self, session: RefreshSession) -> None:
+        self._issued += 1
+        session.id = f"session-{self._issued}"
+        self.sessions.append(session)
+
+    async def get_by_digest(self, digest: str) -> RefreshSession | None:
+        return next(
+            (session for session in self.sessions if session.token_digest == digest),
+            None,
+        )
+
+    async def revoke(
+        self,
+        session_id: str,
+        *,
+        revoked_at: datetime,
+        replaced_by: str | None = None,
+    ) -> None:
+        for session in self.sessions:
+            if session.id == session_id:
+                session.revoked_at = revoked_at
+                session.replaced_by = replaced_by
+
+    async def revoke_family(self, family_id: str, *, revoked_at: datetime) -> int:
+        return await self._revoke(
+            [session for session in self.sessions if session.family_id == family_id],
+            revoked_at,
+        )
+
+    async def revoke_all_for_user(self, user_id: str, *, revoked_at: datetime) -> int:
+        return await self._revoke(
+            [session for session in self.sessions if session.user_id == user_id],
+            revoked_at,
+        )
+
+    async def _revoke(self, candidates: list[RefreshSession], revoked_at: datetime) -> int:
+        """Погасить перечисленные сессии и посчитать, сколько было действующих."""
+        active = [session for session in candidates if not session.is_revoked]
+        for session in active:
+            session.revoked_at = revoked_at
+        return len(active)
+
+    @property
+    def active(self) -> list[RefreshSession]:
+        """Действующие сессии: те, по которым ещё можно получить новую пару."""
+        return [session for session in self.sessions if not session.is_revoked]

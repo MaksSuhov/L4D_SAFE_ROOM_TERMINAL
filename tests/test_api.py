@@ -1,7 +1,9 @@
 """Интеграционные тесты HTTP-слоя.
 
 Подменяются только внешние адаптеры; настоящие роутеры, граф зависимостей и
-сервис RAG работают по-настоящему, что и проверяет саму связку.
+сервис RAG работают по-настоящему, что и проверяет саму связку. Доступ к архиву
+здесь уже открыт: клиент входит тем же способом, что и браузер, — сессия в cookie
+плюс CSRF-метка заголовком.
 """
 
 from __future__ import annotations
@@ -9,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
@@ -22,12 +25,17 @@ from app.dependencies import (
 from app.interfaces import RetrievedChunk
 from app.main import create_app
 from app.taxonomy import SourceType
+from tests.auth_support import override_auth_dependencies, register
 from tests.fakes import (
     FakeAIClient,
+    FakePasswordHasher,
     FakeQueryExpander,
     FakeVectorStore,
+    FixedClock,
     InMemoryCharacterRepository,
     InMemoryLoreChunkRepository,
+    InMemoryRefreshSessionRepository,
+    InMemoryUserRepository,
     build_character,
     build_chunk,
 )
@@ -35,6 +43,8 @@ from tests.fakes import (
 API_PREFIX = get_settings().api_prefix
 ANSWER = "Aw man, the Tank? Keep a wall behind you."
 HYPOTHETICAL = "Оружие в кампании «Вымерший центр»"
+OPERATOR_EMAIL = "ellis@l4d.dev"
+OPERATOR_PASSWORD = "safe-room-passphrase"
 
 
 @pytest.fixture
@@ -75,24 +85,70 @@ def vector_store() -> FakeVectorStore:
 
 
 @pytest.fixture
-def client(
+def application(
     character_repository: InMemoryCharacterRepository,
     lore_chunk_repository: InMemoryLoreChunkRepository,
     ai_client: FakeAIClient,
     query_expander: FakeQueryExpander,
     vector_store: FakeVectorStore,
-) -> Iterator[TestClient]:
+    users: InMemoryUserRepository,
+    sessions: InMemoryRefreshSessionRepository,
+    hasher: FakePasswordHasher,
+    clock: FixedClock,
+) -> Iterator[FastAPI]:
+    """Приложение со всеми внешними адаптерами, подменёнными двойниками."""
     application = create_app()
     application.dependency_overrides[get_character_repository] = lambda: character_repository
     application.dependency_overrides[get_lore_chunk_repository] = lambda: lore_chunk_repository
     application.dependency_overrides[get_ai_client] = lambda: ai_client
     application.dependency_overrides[get_query_expander] = lambda: query_expander
     application.dependency_overrides[get_vector_store] = lambda: vector_store
+    override_auth_dependencies(
+        application,
+        users=users,
+        sessions=sessions,
+        hasher=hasher,
+        clock=clock,
+    )
 
+    yield application
+    application.dependency_overrides.clear()
+
+
+@pytest.fixture
+def client(application: FastAPI) -> Iterator[TestClient]:
+    """Клиент с открытой сессией: он входит так же, как это делает браузер."""
+    with TestClient(application) as test_client:
+        register(
+            test_client,
+            prefix=API_PREFIX,
+            email=OPERATOR_EMAIL,
+            password=OPERATOR_PASSWORD,
+        )
+        yield test_client
+
+
+@pytest.fixture
+def anonymous_client(application: FastAPI) -> Iterator[TestClient]:
+    """Клиент без сессии: им проверяется, что архив закрыт."""
     with TestClient(application) as test_client:
         yield test_client
 
-    application.dependency_overrides.clear()
+
+def test_chat_requires_a_session(anonymous_client: TestClient) -> None:
+    response = anonymous_client.post(
+        f"{API_PREFIX}/chat",
+        json={"character_id": 1, "message": "How do we kill a Tank?"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "invalid_token"
+
+
+def test_characters_require_a_session(anonymous_client: TestClient) -> None:
+    response = anonymous_client.get(f"{API_PREFIX}/characters")
+
+    assert response.status_code == 401
 
 
 def test_chat_returns_answer_with_retrieved_sources(client: TestClient) -> None:
@@ -232,6 +288,9 @@ def test_cors_preflight_allows_the_frontend_origin(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
     assert "POST" in response.headers["access-control-allow-methods"]
+    # Сессия едет в cookie, поэтому браузеру нужно разрешение приложить её к
+    # кросс-доменному запросу; без него он молча выбросил бы аутентификацию.
+    assert response.headers["access-control-allow-credentials"] == "true"
 
 
 def test_cors_does_not_authorise_unknown_origins(client: TestClient) -> None:

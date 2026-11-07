@@ -46,6 +46,9 @@ CHAT_PATH = "/chat"
 CHARACTERS_PATH = "/characters"
 HEALTH_PATH = "/health"
 
+ACCOUNT_EMAIL = "ellis@l4d.dev"
+ACCOUNT_PASSWORD = "safe-room-passphrase"
+
 TANK_FACT = "Танк — Особый заражённый: у него около 4000 единиц здоровья."
 WITCH_FACT = "Ведьма нападает на того, кто её потревожит."
 WALL_RUMOUR = "На стене убежища написано, что это правительство нас травит."
@@ -362,27 +365,49 @@ async def test_the_lexical_leg_changes_which_records_take_the_budget() -> None:
 
 
 async def test_chat_endpoint_runs_the_full_pipeline(seeded: SeededTerminal) -> None:
+    """Проверить весь путь насквозь: от входа до ответа персонажа.
+
+    Здесь всё настоящее, включая аутентификацию: учётная запись заводится в том же
+    Qdrant, пароль хешируется Argon2, а токен подписывается настроенным ключом.
+    """
     application = create_app(seeded.settings)
     application.dependency_overrides[get_vector_store] = lambda: seeded.store
     application.dependency_overrides[get_lore_chunk_repository] = lambda: seeded.lore
     prefix = seeded.settings.api_prefix
+    csrf_header = seeded.settings.auth_csrf_header_name
 
     async with lifespan(application):
         transport = httpx.ASGITransport(app=application)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             health = await client.get(f"{prefix}{HEALTH_PATH}")
+            anonymous = await client.get(f"{prefix}{CHARACTERS_PATH}")
+            session = await client.post(
+                f"{prefix}/auth/register",
+                json={"email": ACCOUNT_EMAIL, "password": ACCOUNT_PASSWORD},
+            )
+            headers = {csrf_header: session.json()["csrf_token"]}
             characters = await client.get(f"{prefix}{CHARACTERS_PATH}")
             chat = await client.post(
+                f"{prefix}{CHAT_PATH}",
+                json={"character_id": characters.json()[0]["id"], "message": "Tank inbound?"},
+                headers=headers,
+            )
+            unmarked = await client.post(
                 f"{prefix}{CHAT_PATH}",
                 json={"character_id": characters.json()[0]["id"], "message": "Tank inbound?"},
             )
             missing = await client.post(
                 f"{prefix}{CHAT_PATH}",
                 json={"character_id": 9999, "message": "Hello?"},
+                headers=headers,
             )
 
     assert health.json()["vector_store"] == "ok"
+    assert anonymous.status_code == 401
+    assert session.status_code == 201
+    assert session.json()["user"]["email"] == ACCOUNT_EMAIL
     assert [character["name"] for character in characters.json()] == PERSONA_NAMES
+    assert unmarked.status_code == 403
 
     assert chat.status_code == 200
     payload = chat.json()
