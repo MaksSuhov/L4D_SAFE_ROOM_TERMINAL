@@ -11,8 +11,8 @@ PIP := .venv/bin/pip
 FRONTEND := frontend
 
 .PHONY: help install install-python install-frontend vectors vectors-down seed seed-reset \
-	reingest import-lore-csv corpus-refresh corpus-translate assets dev dev-backend dev-frontend \
-	test lint typecheck eval check build clean
+	reingest import-lore-csv corpus-refresh corpus-translate assets user dev dev-backend \
+	dev-frontend test lint typecheck eval check build clean
 
 help: ## Показать доступные команды
 	@printf '\nSafe-Room Terminal\n\n'
@@ -39,8 +39,12 @@ vectors-down: ## Остановить векторный узел (данные 
 seed: ## Наполнить хранилище: образы + корпус из снимка (идемпотентно)
 	$(PYTHON) seed.py
 
-seed-reset: ## Пересоздать коллекции и наполнить хранилище заново
+seed-reset: ## Пересоздать коллекции и наполнить хранилище заново (учётные записи не трогает)
 	$(PYTHON) seed.py --reset
+
+user: ## Завести учётную запись: make user EMAIL=operator@l4d.dev [ROLE=admin] [NAME=Оператор]
+	@test -n "$(EMAIL)" || { echo "Укажите адрес: make user EMAIL=operator@l4d.dev"; exit 1; }
+	$(PYTHON) -m scripts.create_user --email "$(EMAIL)" --role "$(or $(ROLE),admin)" $(if $(NAME),--name "$(NAME)")
 
 reingest: ## Переиндексировать архив: очистить lore_chunks и залить снимок заново
 	$(PYTHON) seed.py --reingest

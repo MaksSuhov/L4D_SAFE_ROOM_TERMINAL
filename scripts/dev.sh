@@ -88,6 +88,32 @@ ensure_env_file() {
   warn "Создан .env из .env.example — впишите AI_API_KEY, иначе бэкенд не стартует."
 }
 
+ensure_jwt_secret() {
+  # The terminal refuses to start without a signing secret, and a secret that a
+  # reload regenerates would sign everyone out, so it is written to .env once and
+  # then left alone.
+  local current
+  current="$(grep -hsE '^AUTH_JWT_SECRET=' "$ROOT_DIR/.env" 2>/dev/null | head -n 1 | cut -d= -f2- || true)"
+  if [ -n "${AUTH_JWT_SECRET:-}" ] || [ -n "$current" ]; then
+    return
+  fi
+
+  "$PYTHON" - "$ROOT_DIR/.env" << 'PY' >/dev/null
+import pathlib, re, secrets, sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+line = f"AUTH_JWT_SECRET={secrets.token_urlsafe(48)}"
+if re.search(r"(?m)^AUTH_JWT_SECRET=", text):
+    text = re.sub(r"(?m)^AUTH_JWT_SECRET=.*$", line, text, count=1)
+else:
+    text = f"{text.rstrip()}\n\n{line}\n"
+path.write_text(text, encoding="utf-8")
+PY
+
+  warn "Ключ подписи токенов не задан — сгенерирован AUTH_JWT_SECRET и дописан в .env."
+}
+
 warn_if_provider_key_is_missing() {
   local key
   key="$(grep -hsE '^(AI_API_KEY|OPENAI_API_KEY|ROUTERAI_API_KEY)=' "$ROOT_DIR/.env" 2>/dev/null |
@@ -229,6 +255,7 @@ main() {
   fi
 
   ensure_env_file
+  ensure_jwt_secret
   warn_if_provider_key_is_missing
 
   trap stop_services INT TERM
@@ -251,6 +278,7 @@ main() {
     return 0
   fi
 
+  log "Учётные записи: make user EMAIL=operator@l4d.dev — завести первого оператора."
   log "Всё поднято. Ctrl+C — остановить бэкенд и фронтенд."
   watch_services || return 1
 
