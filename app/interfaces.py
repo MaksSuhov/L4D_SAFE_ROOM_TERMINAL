@@ -11,9 +11,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, NamedTuple, Protocol
 
-from app.domain import Character, LoreChunk
+from app.domain import Character, LoreChunk, RefreshSession, User
 from app.schemas import EmbeddedLoreChunk, LoreSource
 from app.taxonomy import SourceType
 
@@ -285,4 +286,174 @@ class TracerProtocol(Protocol):
 
     def shutdown(self) -> None:
         """Освободить ресурсы трейсера."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class AccessTokenClaims:
+    """Разобранное содержимое токена доступа.
+
+    Вместе с личностью в токен кладутся адрес и роль: их достаточно, чтобы
+    отличить администратора от выжившего, не поднимая учётную запись из
+    хранилища, — а запись всё равно читается, если токен нужно проверить целиком.
+    """
+
+    subject: str
+    email: str
+    role: str
+    issued_at: datetime
+    expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class IssuedAccessToken:
+    """Подписанный токен доступа вместе с моментом, когда он перестанет работать."""
+
+    value: str
+    expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class MintedRefreshToken:
+    """Новый refresh-токен: сырое значение уходит клиенту, отпечаток — в хранилище."""
+
+    value: str
+    digest: str
+
+
+class ClockProtocol(Protocol):
+    """Источник текущего времени.
+
+    Сервис учётных записей зависит от этих часов, а не от ``datetime.now``:
+    сроки жизни токенов проверяются во многих тестах, и подменяемые часы
+    позволяют их не ждать.
+    """
+
+    def now(self) -> datetime:
+        """Вернуть текущий момент в UTC с указанием часового пояса."""
+        ...
+
+
+class PasswordHasherProtocol(Protocol):
+    """Превращение пароля в проверяемый хеш и обратно — в ответ «подходит ли»."""
+
+    def hash(self, password: str) -> str:
+        """Посчитать хеш пароля вместе с солью и параметрами алгоритма."""
+        ...
+
+    def verify(self, password: str, encoded: str) -> bool:
+        """Проверить пароль против ранее сохранённого хеша."""
+        ...
+
+    def needs_rehash(self, encoded: str) -> bool:
+        """Правда ли, что хеш посчитан с устаревшими параметрами и его пора пересчитать."""
+        ...
+
+    def equalise_timing(self, password: str) -> None:
+        """Проделать работу проверки, ничего не проверяя.
+
+        Нужно входу: когда почты в хранилище нет, проверять нечего, и ответ
+        вернулся бы заметно быстрее, чем при неверном пароле, — по этой разнице
+        учётные записи и перечисляют. Вызов стоит столько же, сколько настоящая
+        проверка, и ничего о ней не сообщает.
+        """
+        ...
+
+
+class AccessTokenIssuerProtocol(Protocol):
+    """Выдача и разбор токенов доступа."""
+
+    def issue(self, user: User) -> IssuedAccessToken:
+        """Подписать токен доступа, удостоверяющий эту учётную запись."""
+        ...
+
+    def read(self, token: str) -> AccessTokenClaims:
+        """Разобрать токен и вернуть его содержимое.
+
+        Поднимает :class:`~app.exceptions.TokenExpiredError`, если подпись верна,
+        но срок вышел, и :class:`~app.exceptions.InvalidTokenError` — если токен
+        подделан, испорчен или выпущен не нами.
+        """
+        ...
+
+
+class RefreshTokenFactoryProtocol(Protocol):
+    """Выдача refresh-токенов и их отпечатков."""
+
+    def mint(self) -> MintedRefreshToken:
+        """Выдать новый токен вместе с отпечатком, пригодным для хранения."""
+        ...
+
+    def digest(self, token: str) -> str:
+        """Посчитать отпечаток предъявленного токена, чтобы найти его сессию."""
+        ...
+
+
+class UserRepositoryProtocol(Protocol):
+    """Хранение и чтение учётных записей."""
+
+    async def get_by_id(self, entity_id: str) -> User | None:
+        """Вернуть учётную запись с данным идентификатором или ``None``."""
+        ...
+
+    async def get_by_email(self, email: str) -> User | None:
+        """Найти учётную запись по адресу почты, приведённому к нижнему регистру."""
+        ...
+
+    async def get_all(self) -> Sequence[User]:
+        """Вернуть все учётные записи, упорядоченные по адресу почты."""
+        ...
+
+    async def create(self, user: User) -> None:
+        """Сохранить новую запись, выдав ей идентификатор и время создания.
+
+        Уникальность адреса проверяет вызывающий: хранилище не умеет удерживать
+        его само, и об этом честнее сказать здесь, чем делать вид, что умеет.
+        """
+        ...
+
+    async def update(self, user: User) -> None:
+        """Записать изменённые поля существующей учётной записи."""
+        ...
+
+    async def delete(self, entity_id: str) -> bool:
+        """Удалить учётную запись и сообщить, была ли она вообще."""
+        ...
+
+    async def count(self) -> int:
+        """Вернуть число учётных записей."""
+        ...
+
+
+class RefreshSessionRepositoryProtocol(Protocol):
+    """Хранение и отзыв сессий, выданных по refresh-токенам.
+
+    Время сюда приходит аргументом, а не берётся внутри: часы принадлежат
+    сервису, и один и тот же момент должен стоять и в записи, и в её отзыве.
+    """
+
+    async def create(self, session: RefreshSession) -> None:
+        """Сохранить сессию, выдав ей идентификатор."""
+        ...
+
+    async def get_by_digest(self, digest: str) -> RefreshSession | None:
+        """Найти сессию по отпечатку предъявленного токена."""
+        ...
+
+    async def revoke(
+        self,
+        session_id: str,
+        *,
+        revoked_at: datetime,
+        replaced_by: str | None = None,
+    ) -> None:
+        """Погасить одну сессию, оставив след о том, кто её заменил."""
+        ...
+
+    async def revoke_family(self, family_id: str, *, revoked_at: datetime) -> int:
+        """Погасить всю цепочку ротаций и сообщить, сколько сессий было отозвано."""
+        ...
+
+    async def revoke_all_for_user(self, user_id: str, *, revoked_at: datetime) -> int:
+        """Погасить все сессии учётной записи и сообщить, сколько их было."""
         ...

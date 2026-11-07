@@ -11,5 +11,23 @@
 
 from app.domain.character import Character
 from app.domain.lore_chunk import LoreChunk
+from app.domain.password_policy import (
+    COMMON_PASSWORDS,
+    MAX_PASSWORD_LENGTH,
+    MIN_PASSWORD_LENGTH,
+    PasswordPolicy,
+)
+from app.domain.refresh_session import RefreshSession
+from app.domain.user import User, normalise_email
 
-__all__ = ["Character", "LoreChunk"]
+__all__ = [
+    "COMMON_PASSWORDS",
+    "MAX_PASSWORD_LENGTH",
+    "MIN_PASSWORD_LENGTH",
+    "Character",
+    "LoreChunk",
+    "PasswordPolicy",
+    "RefreshSession",
+    "User",
+    "normalise_email",
+]
