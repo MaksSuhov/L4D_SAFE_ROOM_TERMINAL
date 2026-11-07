@@ -10,14 +10,20 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Final
+from typing import Annotated, Final, Literal
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 DEFAULT_EMBEDDING_DIMENSIONS: Final[int] = 1536
 """Размерность векторов ``text-embedding-3-small``; с ней создаётся плотный вектор
 коллекции, поэтому настройка обязана совпадать с моделью эмбеддингов."""
+
+MIN_JWT_SECRET_LENGTH: Final[int] = 32
+"""Нижняя граница длины ключа подписи: короткий ключ подбирается перебором."""
+
+ALLOWED_JWT_ALGORITHMS: Final[frozenset[str]] = frozenset({"HS256", "HS384", "HS512"})
+"""Симметричные алгоритмы подписи, которые принимает разбор токена."""
 
 
 class Settings(BaseSettings):
@@ -70,6 +76,88 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- Authentication and authorization --------------------------------
+    # Access and refresh tokens travel in httpOnly cookies, so no page script can
+    # read them, and the API accepts an Authorization header as well for
+    # programmatic clients. The signing secret must outlive the process: a restart
+    # that generated a new one would invalidate every session on the terminal.
+    auth_jwt_secret: str = Field(
+        default="",
+        repr=False,
+        description=(
+            "Ключ подписи токенов доступа. Пустое значение — приложение не стартует: "
+            "сгенерировать секрет можно командой "
+            "python -c \"import secrets; print(secrets.token_urlsafe(48))\"."
+        ),
+    )
+    auth_jwt_algorithm: str = Field(
+        default="HS256",
+        description=(
+            "Алгоритм подписи. Допустимы только симметричные HS*, потому что пара "
+            "ключей не настраивается: асимметричную схему незачем включать наполовину."
+        ),
+    )
+    auth_issuer: str = Field(
+        default="l4d-safe-room-terminal",
+        description="Издатель токена: проверяется при разборе, чтобы чужой токен не прошёл.",
+    )
+    auth_audience: str = Field(
+        default="l4d-terminal-clients",
+        description="Получатель токена: тоже проверяется, и тоже отсекает чужие токены.",
+    )
+    auth_access_token_ttl_seconds: int = Field(
+        default=900,
+        gt=0,
+        description=(
+            "Срок жизни токена доступа. Короткий намеренно: токен нельзя отозвать, "
+            "поэтому окно его угона ограничивают временем, а не списком отзыва."
+        ),
+    )
+    auth_refresh_token_ttl_seconds: int = Field(
+        default=60 * 60 * 24 * 30,
+        gt=0,
+        description="Срок жизни refresh-токена: он отзываем, поэтому живёт месяцами.",
+    )
+    auth_cookie_secure: bool = Field(
+        default=False,
+        description=(
+            "Отправлять cookie только по HTTPS. Для локальной разработки выключено; "
+            "развёртывание обязано включить это."
+        ),
+    )
+    auth_cookie_samesite: Literal["lax", "strict", "none"] = Field(
+        default="lax",
+        description=(
+            "Режим SameSite для cookie аутентификации. lax хватает, когда фронтенд и "
+            "API живут на одном сайте (в том числе через прокси dev-сервера): "
+            "межсайтовые POST-запросы cookie не получат."
+        ),
+    )
+    auth_cookie_domain: str = Field(
+        default="",
+        description="Домен cookie; пустая строка — домен запроса.",
+    )
+    auth_access_cookie_name: str = "l4d_access"
+    auth_refresh_cookie_name: str = "l4d_refresh"
+    auth_csrf_cookie_name: str = Field(
+        default="l4d_csrf",
+        description="Cookie с CSRF-токеном; читаемый из скриптов намеренно, см. ниже.",
+    )
+    auth_csrf_header_name: str = Field(
+        default="X-CSRF-Token",
+        description=(
+            "Заголовок, который клиент обязан повторить из cookie при изменяющем "
+            "запросе: посторонний сайт cookie отправит, а заголовок подставить не сможет."
+        ),
+    )
+    auth_registration_enabled: bool = Field(
+        default=True,
+        description=(
+            "Разрешить самостоятельную регистрацию. Выключается там, где учётные "
+            "записи заводит администратор; первая запись всегда создаётся из CLI."
+        ),
+    )
+
     # --- Vector store (Qdrant) -------------------------------------------
     # The archive and the personas live in one Qdrant instance, so a single store
     # serves the whole project and no relational database is needed alongside it.
@@ -106,6 +194,17 @@ class Settings(BaseSettings):
     character_collection: str = Field(
         default="characters",
         description="Коллекция образов выживших; векторов у неё нет, только payload.",
+    )
+    user_collection: str = Field(
+        default="users",
+        description="Коллекция учётных записей терминала; векторов у неё тоже нет.",
+    )
+    refresh_session_collection: str = Field(
+        default="refresh_sessions",
+        description=(
+            "Коллекция выданных refresh-сессий. Записи живут здесь как есть: "
+            "погашенная сессия — это след в цепочке ротаций, а не мусор."
+        ),
     )
     auto_create_collections: bool = Field(
         default=False,
@@ -321,18 +420,53 @@ class Settings(BaseSettings):
         stripped = value.strip().strip("/")
         return f"/{stripped}" if stripped else ""
 
-    @field_validator("cors_allow_origins", mode="before")
+    @field_validator("auth_jwt_algorithm")
     @classmethod
-    def _split_origins(cls, value: object) -> object:
-        """Принять ``a,b``, ``a, b`` или JSON-список и привести к списку."""
-        if isinstance(value, str):
-            return [origin.strip() for origin in value.split(",") if origin.strip()]
-        return value
+    def _restrict_jwt_algorithm(cls, value: str) -> str:
+        """Отклонить алгоритм подписи, которого нет в разрешённом наборе."""
+        normalised = value.strip().upper()
+        if normalised not in ALLOWED_JWT_ALGORITHMS:
+            allowed = ", ".join(sorted(ALLOWED_JWT_ALGORITHMS))
+            raise ValueError(f"auth_jwt_algorithm must be one of: {allowed}")
+        return normalised
+
+    @field_validator("auth_jwt_secret")
+    @classmethod
+    def _require_long_secret(cls, value: str) -> str:
+        """Принять пустой ключ как «не настроено», но не принять ключ-огрызок."""
+        secret = value.strip()
+        if secret and len(secret) < MIN_JWT_SECRET_LENGTH:
+            raise ValueError(
+                f"auth_jwt_secret must be at least {MIN_JWT_SECRET_LENGTH} characters"
+            )
+        return secret
+
+    @model_validator(mode="after")
+    def _check_cookie_flags(self) -> Settings:
+        """Не дать выставить SameSite=None без Secure: браузер такую cookie отвергнет."""
+        if self.auth_cookie_samesite == "none" and not self.auth_cookie_secure:
+            raise ValueError("auth_cookie_samesite='none' requires auth_cookie_secure=true")
+        return self
 
     @property
     def is_ai_configured(self) -> bool:
         """Есть ли API-ключ; проверяется до создания клиента."""
         return bool(self.ai_api_key.strip())
+
+    @property
+    def is_auth_configured(self) -> bool:
+        """Есть ли ключ подписи; без него приложение не стартует."""
+        return bool(self.auth_jwt_secret)
+
+    @property
+    def auth_refresh_cookie_path(self) -> str:
+        """Путь, на который браузер шлёт refresh-cookie.
+
+        Уже корня намеренно: токен нужен только эндпоинтам аутентификации, и
+        сужать его область дешевле, чем объяснять, почему он уехал вместе с
+        вопросом к персонажу.
+        """
+        return f"{self.api_prefix}/auth"
 
     @property
     def is_langfuse_configured(self) -> bool:
