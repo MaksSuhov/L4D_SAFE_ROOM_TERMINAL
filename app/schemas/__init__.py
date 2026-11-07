@@ -6,6 +6,7 @@ ORM-модели никогда не покидают слой сервисов,
 путь импорта, пока определения сгруппированы по агрегату.
 """
 
+from app.schemas.auth_schema import RefreshRequest, RegisterRequest, SessionResponse
 from app.schemas.character_schema import (
     CharacterBase,
     CharacterCreate,
@@ -20,6 +21,7 @@ from app.schemas.lore_schema import (
     LoreChunkCreate,
     LoreSource,
 )
+from app.schemas.user_schema import RevocationReport, UserRead, UserUpdate
 
 __all__ = [
     "CharacterBase",
@@ -33,4 +35,10 @@ __all__ = [
     "IngestionReport",
     "LoreChunkCreate",
     "LoreSource",
+    "RefreshRequest",
+    "RegisterRequest",
+    "RevocationReport",
+    "SessionResponse",
+    "UserRead",
+    "UserUpdate",
 ]
