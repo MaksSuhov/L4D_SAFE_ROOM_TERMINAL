@@ -5,10 +5,15 @@ import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
 
 /**
- * The dev server proxies `/api` to the FastAPI backend so that a build can also
- * be served against a relative base URL. The default configuration talks to
- * `http://localhost:8000` directly instead (see `src/api/config.js`).
+ * The dev server proxies the API and its documentation to the FastAPI backend.
+ *
+ * Everything the browser talks to goes through this origin — `/api` for the
+ * endpoints, `/docs` and `/openapi.json` for the reference — so the session
+ * cookie behaves exactly as it will in production, where both are served from
+ * one host. `src/api/config.js` therefore defaults to same-origin requests.
  */
+const BACKEND = 'http://localhost:8000'
+
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
   resolve: {
@@ -19,10 +24,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
+      '/api': { target: BACKEND, changeOrigin: true },
+      '/docs': { target: BACKEND, changeOrigin: true },
+      '/openapi.json': { target: BACKEND, changeOrigin: true },
     },
   },
 })

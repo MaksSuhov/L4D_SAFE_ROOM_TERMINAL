@@ -1,5 +1,5 @@
 <script setup>
-import { BookOpen, RadioTower, RefreshCw, RotateCcw } from 'lucide-vue-next'
+import { BookOpen, LogOut, RadioTower, RefreshCw, RotateCcw, Users } from 'lucide-vue-next'
 import { computed } from 'vue'
 
 import { apiDocsUrl } from '@/api/config'
@@ -10,9 +10,12 @@ const MARK_URL = '/brand/l4d-mark.png'
 const props = defineProps({
   /** 'connecting' | 'online' | 'offline' — the state of the roster request. */
   status: { type: String, default: 'connecting' },
+  /** Who is signed in: the header names them so the session is never anonymous. */
+  userName: { type: String, default: '' },
+  isAdmin: { type: Boolean, default: false },
 })
 
-defineEmits(['new-session', 'retry'])
+defineEmits(['new-session', 'retry', 'log-out', 'open-admin'])
 
 const STATUS = {
   connecting: { label: 'Поиск сигнала', dot: 'bg-term-amber animate-pulse', text: 'text-term-amber' },
@@ -21,6 +24,8 @@ const STATUS = {
 }
 
 const state = computed(() => STATUS[props.status] ?? STATUS.connecting)
+
+const roleLabel = computed(() => (props.isAdmin ? 'оператор' : 'выживший'))
 </script>
 
 <template>
@@ -56,6 +61,16 @@ const state = computed(() => STATUS[props.status] ?? STATUS.connecting)
           <span class="size-1.5 rounded-full" :class="state.dot" aria-hidden="true" />
         </span>
 
+        <span
+          v-if="userName"
+          class="hidden items-center gap-1.5 rounded-sm border border-zinc-800 bg-bunker-950/60 px-2.5 py-1 text-[0.6rem] tracking-[0.2em] uppercase lg:flex"
+          :class="isAdmin ? 'text-term-green' : 'text-zinc-500'"
+        >
+          {{ userName }}
+          <span class="text-zinc-600">·</span>
+          <span class="text-zinc-600">{{ roleLabel }}</span>
+        </span>
+
         <button
           v-if="status === 'offline'"
           type="button"
@@ -77,6 +92,17 @@ const state = computed(() => STATUS[props.status] ?? STATUS.connecting)
           <span class="hidden sm:inline">Новая сессия</span>
         </button>
 
+        <button
+          v-if="isAdmin"
+          type="button"
+          class="flex shrink-0 items-center gap-1.5 rounded-sm border border-zinc-800 px-2.5 py-1 text-[0.6rem] tracking-[0.2em] whitespace-nowrap text-zinc-500 uppercase transition-colors hover:border-term-green/40 hover:text-term-green"
+          aria-label="Учётные записи"
+          @click="$emit('open-admin')"
+        >
+          <Users class="size-3.5" aria-hidden="true" />
+          <span class="hidden sm:inline">Учётные записи</span>
+        </button>
+
         <a
           :href="apiDocsUrl"
           target="_blank"
@@ -86,6 +112,17 @@ const state = computed(() => STATUS[props.status] ?? STATUS.connecting)
           <BookOpen class="size-3.5" aria-hidden="true" />
           API
         </a>
+
+        <button
+          v-if="userName"
+          type="button"
+          class="flex shrink-0 items-center gap-1.5 rounded-sm border border-zinc-800 px-2.5 py-1 text-[0.6rem] tracking-[0.2em] whitespace-nowrap text-zinc-500 uppercase transition-colors hover:border-term-blood/50 hover:text-term-blood"
+          aria-label="Выйти"
+          @click="$emit('log-out')"
+        >
+          <LogOut class="size-3.5" aria-hidden="true" />
+          <span class="hidden sm:inline">Выход</span>
+        </button>
       </div>
     </div>
   </header>
